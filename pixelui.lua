@@ -862,6 +862,12 @@ function ProgressBar:new(props)
     progressbar.max = props.max or 100
     progressbar.color = props.color or colors.green
     progressbar.background = props.background or colors.gray
+    progressbar.intermediate = props.intermediate or false -- Enable intermediate/indeterminate mode
+    progressbar.intermediateSpeed = props.intermediateSpeed or 2 -- Speed of intermediate animation
+    progressbar.intermediateSize = props.intermediateSize or 3 -- Size of moving indicator
+    progressbar.intermediatePosition = 0 -- Current position of intermediate indicator
+    progressbar.intermediateDirection = 1 -- Direction: 1 for right, -1 for left
+    progressbar.lastIntermediateUpdate = os.clock()
     
     if not props.width then
         progressbar.width = 20
@@ -876,20 +882,69 @@ end
 function ProgressBar:render()
     local absX, absY = self:getAbsolutePos()
     
+    -- Draw background
     term.setBackgroundColor(self.background)
     term.setCursorPos(absX, absY)
     term.write(string.rep(" ", self.width))
     
-    local progress = math.min(self.value / self.max, 1)
-    local fillWidth = math.floor(progress * self.width)
-    
-    if fillWidth > 0 then
-        term.setBackgroundColor(self.color)
-        term.setCursorPos(absX, absY)
-        term.write(string.rep(" ", fillWidth))
+    if self.intermediate then
+        -- Intermediate/indeterminate mode - moving indicator
+        self:updateIntermediateAnimation()
+        
+        -- Draw moving indicator
+        local indicatorStart = math.floor(self.intermediatePosition)
+        local indicatorEnd = math.min(self.width, indicatorStart + self.intermediateSize - 1)
+        
+        if indicatorStart >= 1 and indicatorStart <= self.width then
+            term.setBackgroundColor(self.color)
+            term.setCursorPos(absX + indicatorStart - 1, absY)
+            local indicatorWidth = indicatorEnd - indicatorStart + 1
+            term.write(string.rep(" ", indicatorWidth))
+        end
+    else
+        -- Normal progress mode
+        local progress = math.min(self.value / self.max, 1)
+        local fillWidth = math.floor(progress * self.width)
+        
+        if fillWidth > 0 then
+            term.setBackgroundColor(self.color)
+            term.setCursorPos(absX, absY)
+            term.write(string.rep(" ", fillWidth))
+        end
     end
     
     term.setBackgroundColor(colors.black)
+end
+
+function ProgressBar:updateIntermediateAnimation()
+    local now = os.clock()
+    local deltaTime = now - self.lastIntermediateUpdate
+    self.lastIntermediateUpdate = now
+    
+    -- Update position based on speed and direction
+    self.intermediatePosition = self.intermediatePosition + (self.intermediateSpeed * deltaTime * self.intermediateDirection)
+    
+    -- Bounce off edges
+    if self.intermediateDirection == 1 and self.intermediatePosition + self.intermediateSize > self.width then
+        self.intermediateDirection = -1
+        self.intermediatePosition = self.width - self.intermediateSize + 1
+    elseif self.intermediateDirection == -1 and self.intermediatePosition < 1 then
+        self.intermediateDirection = 1
+        self.intermediatePosition = 1
+    end
+    
+    -- Clamp position to valid range
+    self.intermediatePosition = math.max(1, math.min(self.width - self.intermediateSize + 1, self.intermediatePosition))
+end
+
+function ProgressBar:setIntermediate(enabled)
+    self.intermediate = enabled
+    if enabled then
+        -- Reset intermediate animation state
+        self.intermediatePosition = 1
+        self.intermediateDirection = 1
+        self.lastIntermediateUpdate = os.clock()
+    end
 end
 
 -- ListView Widget
