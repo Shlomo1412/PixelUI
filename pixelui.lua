@@ -218,6 +218,11 @@ for i = 0, 15 do
     colorHex[("%x"):format(i)] = 2^i
 end
 
+-- Function to safely get hex color
+local function getColorHex(color)
+    return colorHex[color] or "f" -- Default to white if color not found
+end
+
 -- Draws a thin character-based border around a widget area
 -- @param absX, absY: absolute position of the widget
 -- @param width, height: dimensions of the widget
@@ -227,9 +232,14 @@ local function drawCharBorder(absX, absY, width, height, borderColor, bgColor)
     borderColor = borderColor or colors.lightGray
     bgColor = bgColor or colors.black
     
-    -- Set up blit strings for the border
-    local borderHex = colorHex[borderColor]
-    local bgHex = colorHex[bgColor]
+    -- Set up blit strings for the border with safe hex conversion
+    local borderHex = getColorHex(borderColor)
+    local bgHex = getColorHex(bgColor)
+    
+    -- Validate that we have valid hex strings
+    if not borderHex or not bgHex then
+        return -- Skip drawing if we can't get valid colors
+    end
     
     -- Special case for single-pixel-high widgets: only draw side borders
     if height == 1 then
