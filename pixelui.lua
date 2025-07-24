@@ -185,6 +185,72 @@ local function isPointInBounds(x, y, widget)
            y >= widget.y and y < widget.y + widget.height
 end
 
+-- Border utilities for character-based borders (similar to Basalt)
+local colorHex = {}
+for i = 0, 15 do
+    colorHex[2^i] = ("%x"):format(i)
+    colorHex[("%x"):format(i)] = 2^i
+end
+
+-- Draws a thin character-based border around a widget area
+-- @param absX, absY: absolute position of the widget
+-- @param width, height: dimensions of the widget
+-- @param borderColor: color of the border
+-- @param bgColor: background color of the widget
+local function drawCharBorder(absX, absY, width, height, borderColor, bgColor)
+    borderColor = borderColor or colors.lightGray
+    bgColor = bgColor or colors.black
+    
+    -- Set up blit strings for the border
+    local borderHex = colorHex[borderColor]
+    local bgHex = colorHex[bgColor]
+    
+    -- Special case for single-pixel-high widgets: only draw side borders
+    if height == 1 then
+        -- Left border
+        term.setCursorPos(absX, absY)
+        term.blit("\149", borderHex, bgHex)
+        
+        -- Right border
+        term.setCursorPos(absX + width - 1, absY)
+        term.blit("\149", bgHex, borderHex)
+        return
+    end
+    
+    -- Normal border drawing for height > 1
+    -- Top border (horizontal line)
+    term.setCursorPos(absX, absY)
+    term.blit(string.rep("\131", width), string.rep(borderHex, width), string.rep(bgHex, width))
+    
+    -- Bottom border (horizontal line)
+    term.setCursorPos(absX, absY + height - 1)
+    term.blit(string.rep("\143", width), string.rep(bgHex, width), string.rep(borderHex, width))
+    
+    -- Left and right borders (vertical lines)
+    for i = 1, height - 2 do
+        -- Left border
+        term.setCursorPos(absX, absY + i)
+        term.blit("\149", borderHex, bgHex)
+        
+        -- Right border
+        term.setCursorPos(absX + width - 1, absY + i)
+        term.blit("\149", bgHex, borderHex)
+    end
+    
+    -- Corners
+    term.setCursorPos(absX, absY)
+    term.blit("\151", borderHex, bgHex) -- Top-left corner
+    
+    term.setCursorPos(absX + width - 1, absY)
+    term.blit("\148", bgHex, borderHex) -- Top-right corner
+    
+    term.setCursorPos(absX, absY + height - 1)
+    term.blit("\138", bgHex, borderHex) -- Bottom-left corner
+    
+    term.setCursorPos(absX + width - 1, absY + height - 1)
+    term.blit("\133", bgHex, borderHex) -- Bottom-right corner
+end
+
 -- Base Widget class
 local Widget = {}
 Widget.__index = Widget
@@ -403,30 +469,23 @@ function Button:render()
     end
     
     if self.border then
-        -- Draw border using background colors
+        -- Draw character-based border
         local borderColor = colors.gray
+        drawCharBorder(absX, absY, self.width, self.height, borderColor, bgColor)
         
-        -- Top and bottom borders
-        term.setBackgroundColor(borderColor)
-        for i = 0, 1 do
-            local y = absY + i * (self.height - 1)
-            term.setCursorPos(absX, y)
-            term.write(string.rep(" ", self.width))
-        end
-        
-        -- Left and right borders
-        for i = 1, self.height - 2 do
-            term.setCursorPos(absX, absY + i)
-            term.write(" ")
-            term.setCursorPos(absX + self.width - 1, absY + i)
-            term.write(" ")
-        end
-        
-        -- Fill interior with button background
-        term.setBackgroundColor(bgColor)
-        for i = 1, self.height - 2 do
-            term.setCursorPos(absX + 1, absY + i)
+        -- Fill interior with button background (handle single-pixel height)
+        if self.height == 1 then
+            -- For single-pixel-high buttons, fill the space between the borders
+            term.setBackgroundColor(bgColor)
+            term.setCursorPos(absX + 1, absY)
             term.write(string.rep(" ", self.width - 2))
+        else
+            -- For multi-row buttons, fill each interior row
+            term.setBackgroundColor(bgColor)
+            for i = 1, self.height - 2 do
+                term.setCursorPos(absX + 1, absY + i)
+                term.write(string.rep(" ", self.width - 2))
+            end
         end
         
         -- Draw text in center
@@ -1043,22 +1102,7 @@ function Container:render()
     
     if self.border then
         local borderColor = currentTheme.border
-        
-        -- Top and bottom borders
-        term.setBackgroundColor(borderColor)
-        for i = 0, 1 do
-            local y = absY + i * (self.height - 1)
-            term.setCursorPos(absX, y)
-            term.write(string.rep(" ", self.width))
-        end
-        
-        -- Left and right borders
-        for i = 1, self.height - 2 do
-            term.setCursorPos(absX, absY + i)
-            term.write(" ")
-            term.setCursorPos(absX + self.width - 1, absY + i)
-            term.write(" ")
-        end
+        drawCharBorder(absX, absY, self.width, self.height, borderColor, self.background or colors.black)
         
         -- Restore interior background if specified
         if self.background then
@@ -1887,20 +1931,7 @@ function Canvas:render()
     
     -- Draw border if enabled
     if self.border then
-        term.setBackgroundColor(self.borderColor)
-        -- Top and bottom borders
-        for i = 0, 1 do
-            local y = absY + i * (self.height - 1)
-            term.setCursorPos(absX, y)
-            term.write(string.rep(" ", self.width))
-        end
-        -- Left and right borders
-        for i = 1, self.height - 2 do
-            term.setCursorPos(absX, absY + i)
-            term.write(" ")
-            term.setCursorPos(absX + self.width - 1, absY + i)
-            term.write(" ")
-        end
+        drawCharBorder(absX, absY, self.width, self.height, self.borderColor, self.background)
     end
     
     -- Draw canvas content
@@ -2115,23 +2146,15 @@ function ContextMenu:render()
     local absX, absY = self:getAbsolutePos()
     local theme = currentTheme
     
-    -- Draw background and border
+    -- Draw background
     term.setBackgroundColor(theme.contextMenu.background)
-    term.setTextColor(theme.contextMenu.border)
-    
-    -- Draw border
-    term.setCursorPos(absX, absY)
-    term.write("+" .. string.rep("-", self.width - 2) .. "+")
-    
-    for i = 1, self.height - 2 do
+    for i = 0, self.height - 1 do
         term.setCursorPos(absX, absY + i)
-        term.write("|")
-        term.setCursorPos(absX + self.width - 1, absY + i)
-        term.write("|")
+        term.write(string.rep(" ", self.width))
     end
     
-    term.setCursorPos(absX, absY + self.height - 1)
-    term.write("+" .. string.rep("-", self.width - 2) .. "+")
+    -- Draw character-based border
+    drawCharBorder(absX, absY, self.width, self.height, theme.contextMenu.border, theme.contextMenu.background)
     
     -- Draw menu items
     for i, item in ipairs(self.items) do
@@ -2258,27 +2281,14 @@ function GroupBox:render()
     end
     
     if self.border then
-        term.setTextColor(self.borderColor)
-        term.setBackgroundColor(self.background or colors.black)
+        -- Draw character-based border
+        drawCharBorder(absX, absY, self.width, self.height, self.borderColor, self.background or colors.black)
         
-        -- Draw border
-        term.setCursorPos(absX, absY)
-        term.write("+" .. string.rep("-", self.width - 2) .. "+")
-        
-        for i = 1, self.height - 2 do
-            term.setCursorPos(absX, absY + i)
-            term.write("|")
-            term.setCursorPos(absX + self.width - 1, absY + i)
-            term.write("|")
-        end
-        
-        term.setCursorPos(absX, absY + self.height - 1)
-        term.write("+" .. string.rep("-", self.width - 2) .. "+")
-        
-        -- Draw title
+        -- Draw title on top of the border
         if #self.title > 0 then
             term.setCursorPos(absX + 2, absY)
             term.setTextColor(self.titleColor)
+            term.setBackgroundColor(self.background or colors.black)
             term.write(" " .. self.title .. " ")
         end
     end
@@ -2393,20 +2403,8 @@ function Modal:render()
         term.write(string.rep(" ", self.width))
     end
     
-    -- Draw border
-    term.setTextColor(colors.black)
-    term.setCursorPos(absX, absY)
-    term.write("+" .. string.rep("-", self.width - 2) .. "+")
-    
-    for i = 1, self.height - 2 do
-        term.setCursorPos(absX, absY + i)
-        term.write("|")
-        term.setCursorPos(absX + self.width - 1, absY + i)
-        term.write("|")
-    end
-    
-    term.setCursorPos(absX, absY + self.height - 1)
-    term.write("+" .. string.rep("-", self.width - 2) .. "+")
+    -- Draw character-based border
+    drawCharBorder(absX, absY, self.width, self.height, colors.black, self.background)
     
     -- Draw content
     if self.content then
@@ -3181,20 +3179,8 @@ function MsgBox:render()
         term.write(string.rep(" ", self.width))
     end
     
-    -- Draw border
-    term.setTextColor(colors.black)
-    term.setCursorPos(absX, absY)
-    term.write("+" .. string.rep("-", self.width - 2) .. "+")
-    
-    for i = 1, self.height - 2 do
-        term.setCursorPos(absX, absY + i)
-        term.write("|")
-        term.setCursorPos(absX + self.width - 1, absY + i)
-        term.write("|")
-    end
-    
-    term.setCursorPos(absX, absY + self.height - 1)
-    term.write("+" .. string.rep("-", self.width - 2) .. "+")
+    -- Draw character-based border
+    drawCharBorder(absX, absY, self.width, self.height, colors.black, self.background)
     
     -- Draw title bar
     term.setBackgroundColor(colors.blue)
