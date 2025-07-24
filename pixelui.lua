@@ -1783,13 +1783,11 @@ function ComboBox:render()
     
     -- Draw dropdown if open
     if self.isOpen then
-        local maxItems = math.min(#self.items, 8) -- Limit dropdown height to 8 items
-        for i = 1, maxItems do
-            local itemIndex = i
-            local item = self.items[itemIndex]
+        for i = 1, #self.items do
+            local item = self.items[i]
             if item then
                 term.setCursorPos(absX, absY + i)
-                local isSelected = itemIndex == self.selectedIndex
+                local isSelected = i == self.selectedIndex
                 term.setBackgroundColor(isSelected and colors.blue or colors.lightGray)
                 term.setTextColor(isSelected and colors.white or colors.black)
                 local itemText = tostring(item):sub(1, self.width)
@@ -1806,7 +1804,7 @@ function ComboBox:onClick(relX, relY)
         if not self.isOpen then
             -- Open the dropdown
             self.isOpen = true
-            self.height = self.baseHeight + math.min(#self.items, 8)
+            self.height = self.baseHeight + #self.items
         else
             -- If clicking on the main box area, close dropdown
             if relY == 1 then
@@ -1815,8 +1813,7 @@ function ComboBox:onClick(relX, relY)
             -- If clicking on dropdown items
             elseif relY > 1 then
                 local selectedIndex = relY - 1
-                local maxItems = math.min(#self.items, 8)
-                if selectedIndex >= 1 and selectedIndex <= maxItems and selectedIndex <= #self.items then
+                if selectedIndex >= 1 and selectedIndex <= #self.items then
                     self.selectedIndex = selectedIndex
                     if self.onSelect then
                         self:onSelect(self.items[selectedIndex], selectedIndex)
@@ -3983,22 +3980,7 @@ function PixelUI.handleEvent(event, ...)
             end)
         end
 
-        -- Close any open dropdowns when clicking outside them
-        traverse(widgets, function(widget)
-            if widget.isOpen ~= nil and widget.isOpen then
-                local absX, absY = widget.getAbsolutePos and widget:getAbsolutePos() or 0, 0
-                local relX, relY = x - absX + 1, y - absY + 1
-                if not (relX >= 1 and relX <= widget.width and relY >= 1 and relY <= widget.height) then
-                    widget.isOpen = false
-                    if widget.baseHeight then
-                        widget.height = widget.baseHeight
-                    end
-                end
-            end
-            return false
-        end)
-
-        -- Handle click events for all widgets (reverse order for proper z-index)
+        -- Handle click events for all widgets first (reverse order for proper z-index)
         local clickHandled = false
         traverse(widgets, function(widget)
             if widget.visible ~= false and widget.handleClick and widget:handleClick(x, y) then
@@ -4007,6 +3989,26 @@ function PixelUI.handleEvent(event, ...)
             end
             return false
         end)
+
+        -- Close any open dropdowns when clicking outside them (only if no widget handled the click)
+        if not clickHandled then
+            traverse(widgets, function(widget)
+                if widget.isOpen ~= nil and widget.isOpen then
+                    local absX, absY = widget.getAbsolutePos and widget:getAbsolutePos() or 0, 0
+                    local relX, relY = x - absX + 1, y - absY + 1
+                    -- For ComboBox widgets, don't close if clicking within the expanded dropdown area
+                    local isComboBox = widget.items ~= nil and widget.baseHeight ~= nil
+                    local actualHeight = widget.height
+                    if not (relX >= 1 and relX <= widget.width and relY >= 1 and relY <= actualHeight) then
+                        widget.isOpen = false
+                        if widget.baseHeight then
+                            widget.height = widget.baseHeight
+                        end
+                    end
+                end
+                return false
+            end)
+        end
         
         -- If no widget handled the click, clear focus
         if not clickHandled then
