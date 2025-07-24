@@ -8,7 +8,7 @@ A modern, feature-rich, extensible UI framework for ComputerCraft and CC: Tweake
 
 ## 🚀 Super Features
 
-- **Comprehensive Widget Library**: Buttons, labels, text boxes, checkboxes, sliders, progress bars, list views, containers, group boxes, color pickers, color picker dialogs, tab controls, combo boxes, numeric up/down, spinners, loading indicators, scrollbars, modal dialogs, draggable widgets, and more.
+- **Comprehensive Widget Library**: Buttons, labels, text boxes, checkboxes, sliders, range sliders, progress bars, list views, containers, group boxes, color pickers, color picker dialogs, tab controls, combo boxes, numeric up/down, spinners, loading indicators, scrollbars, modal dialogs, charts, draggable widgets, and more.
 - **Advanced Layouts**: Absolute, vertical, horizontal, and smart margin/grid layouts for complex UIs.
 - **Scrollable Containers**: True scrollable containers with automatic scrollbars, strict clipping, and event handling.
 - **Event System**: Mouse, keyboard, scroll, drag, and focus events, with full propagation and focus management.
@@ -242,6 +242,31 @@ PixelUI.slider({ x = 2, y = 10, width = 20, min = 0, max = 100, value = 50, onCh
 
 ---
 
+### `PixelUI.rangeSlider(props)` — **Range Slider**
+**Properties:**
+- `x`, `y`, `width`
+- `rangeMin`, `rangeMax`: Overall range bounds
+- `minValue`, `maxValue`: Current selected range
+- `step`: Value increment step
+- `trackColor`, `fillColor`, `knobColor`: Colors
+- `showValues`: Show range values as text
+- `valueFormat`: Format string for values (default: "%.0f")
+
+**Events:**
+- `onChange(self, minValue, maxValue)`: On range change
+
+**Example:**
+```lua
+PixelUI.rangeSlider({ 
+  x = 2, y = 10, width = 25, 
+  rangeMin = 0, rangeMax = 100, 
+  minValue = 20, maxValue = 80,
+  onChange = function(self, min, max) print("Range:", min, "-", max) end 
+})
+```
+
+---
+
 ### `PixelUI.progressBar(props)` — **Progress Bar**
 **Properties:**
 - `x`, `y`, `width`
@@ -415,6 +440,32 @@ PixelUI.groupBox({ x = 2, y = 30, width = 20, height = 6, text = "Group" })
 ```lua
 local c = PixelUI.canvas({ x = 2, y = 32, width = 10, height = 5 })
 c:setPixel(1, 1, colors.red)
+```
+
+---
+
+### `PixelUI.chart(props)` — **Data Visualization**
+**Properties:**
+- `x`, `y`, `width`, `height`
+- `data`: Array of data points (tables with x, y properties or arrays)
+- `chartType`: `"line"`, `"bar"`, or `"scatter"` (default: "line")
+- `title`, `xLabel`, `yLabel`: Chart labels
+- `background`, `axisColor`, `dataColor`: Colors
+- `titleColor`, `labelColor`, `gridColor`: Text colors
+- `showGrid`: Show grid lines (default: true)
+- `autoScale`: Auto-scale axes (default: true)
+- `minX`, `maxX`, `minY`, `maxY`: Manual axis bounds (when autoScale = false)
+
+**Events:** None
+
+**Example:**
+```lua
+local data = {{x=1, y=10}, {x=2, y=25}, {x=3, y=15}, {x=4, y=30}}
+PixelUI.chart({ 
+  x = 2, y = 5, width = 30, height = 12,
+  data = data, chartType = "line",
+  title = "Sample Chart", xLabel = "Time", yLabel = "Value"
+})
 ```
 
 ---

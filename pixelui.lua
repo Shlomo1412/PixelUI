@@ -943,6 +943,164 @@ function Slider:handleDrag(x, y)
     end
 end
 
+-- RangeSlider Widget
+local RangeSlider = setmetatable({}, {__index = Widget})
+RangeSlider.__index = RangeSlider
+
+function RangeSlider:new(props)
+    local rangeslider = Widget.new(self, props)
+    rangeslider.minValue = props.minValue or 0
+    rangeslider.maxValue = props.maxValue or 100
+    rangeslider.rangeMin = props.rangeMin or 0
+    rangeslider.rangeMax = props.rangeMax or 100
+    rangeslider.step = props.step or 1
+    rangeslider.onChange = props.onChange
+    rangeslider.showValues = props.showValues ~= false
+    rangeslider.valueFormat = props.valueFormat or "%.0f"
+    rangeslider.trackColor = props.trackColor or currentTheme.border
+    rangeslider.fillColor = props.fillColor or currentTheme.primary
+    rangeslider.knobColor = props.knobColor or colors.white
+    rangeslider.activeKnob = nil -- "min" or "max" for which knob is being dragged
+    
+    if not props.width then
+        rangeslider.width = 20
+    end
+    if not props.height then
+        rangeslider.height = 1
+    end
+    
+    -- Clamp initial values to valid range
+    rangeslider.minValue = clamp(rangeslider.minValue, rangeslider.rangeMin, rangeslider.rangeMax)
+    rangeslider.maxValue = clamp(rangeslider.maxValue, rangeslider.rangeMin, rangeslider.rangeMax)
+    
+    -- Ensure min <= max
+    if rangeslider.minValue > rangeslider.maxValue then
+        local temp = rangeslider.minValue
+        rangeslider.minValue = rangeslider.maxValue
+        rangeslider.maxValue = temp
+    end
+    
+    return rangeslider
+end
+
+function RangeSlider:render()
+    local absX, absY = self:getAbsolutePos()
+    local theme = currentTheme
+    
+    -- Calculate positions
+    local range = self.rangeMax - self.rangeMin
+    local minProgress = (self.minValue - self.rangeMin) / range
+    local maxProgress = (self.maxValue - self.rangeMin) / range
+    local minKnobPos = math.floor(minProgress * (self.width - 1)) + 1
+    local maxKnobPos = math.floor(maxProgress * (self.width - 1)) + 1
+    
+    -- Draw track background
+    term.setBackgroundColor(self.trackColor or theme.border)
+    term.setCursorPos(absX, absY)
+    term.write(string.rep(" ", self.width))
+    
+    -- Draw filled portion between knobs
+    if maxKnobPos > minKnobPos then
+        term.setBackgroundColor(self.fillColor or theme.primary)
+        term.setCursorPos(absX + minKnobPos - 1, absY)
+        term.write(string.rep(" ", maxKnobPos - minKnobPos + 1))
+    end
+    
+    -- Draw min knob
+    term.setBackgroundColor(self.knobColor or colors.white)
+    term.setTextColor(theme.primary)
+    term.setCursorPos(absX + minKnobPos - 1, absY)
+    local minKnobChar = "[" 
+    if not self.enabled then
+        term.setBackgroundColor(colors.lightGray)
+        term.setTextColor(colors.gray)
+        minKnobChar = "["
+    elseif isDragging and draggedWidget == self and self.activeKnob == "min" then
+        term.setBackgroundColor(theme.secondary)
+        term.setTextColor(colors.white)
+    end
+    term.write(minKnobChar)
+    
+    -- Draw max knob
+    term.setBackgroundColor(self.knobColor or colors.white)
+    term.setTextColor(theme.primary)
+    term.setCursorPos(absX + maxKnobPos - 1, absY)
+    local maxKnobChar = "]"
+    if not self.enabled then
+        term.setBackgroundColor(colors.lightGray)
+        term.setTextColor(colors.gray)
+        maxKnobChar = "]"
+    elseif isDragging and draggedWidget == self and self.activeKnob == "max" then
+        term.setBackgroundColor(theme.secondary)
+        term.setTextColor(colors.white)
+    end
+    term.write(maxKnobChar)
+    
+    -- Draw value display if enabled
+    if self.showValues then
+        local valueText = string.format(self.valueFormat .. " - " .. self.valueFormat, self.minValue, self.maxValue)
+        local valueX = absX + self.width + 2
+        
+        term.setBackgroundColor(colors.black)
+        term.setTextColor(theme.text)
+        term.setCursorPos(valueX, absY)
+        term.write(valueText)
+    end
+    
+    term.setBackgroundColor(colors.black)
+end
+
+function RangeSlider:onClick(relX, relY)
+    if self.enabled then
+        -- Determine which knob is closer
+        local range = self.rangeMax - self.rangeMin
+        local minProgress = (self.minValue - self.rangeMin) / range
+        local maxProgress = (self.maxValue - self.rangeMin) / range
+        local minKnobPos = math.floor(minProgress * (self.width - 1)) + 1
+        local maxKnobPos = math.floor(maxProgress * (self.width - 1)) + 1
+        
+        local distToMin = math.abs(relX - minKnobPos)
+        local distToMax = math.abs(relX - maxKnobPos)
+        
+        if distToMin <= distToMax then
+            self.activeKnob = "min"
+        else
+            self.activeKnob = "max"
+        end
+        
+        -- Start dragging
+        isDragging = true
+        draggedWidget = self
+        self:updateValue(relX)
+    end
+end
+
+function RangeSlider:updateValue(relX)
+    local progress = (relX - 1) / (self.width - 1)
+    progress = math.max(0, math.min(1, progress))
+    local newValue = self.rangeMin + progress * (self.rangeMax - self.rangeMin)
+    newValue = math.floor(newValue / self.step) * self.step
+    newValue = clamp(newValue, self.rangeMin, self.rangeMax)
+    
+    if self.activeKnob == "min" then
+        self.minValue = math.min(newValue, self.maxValue)
+    else
+        self.maxValue = math.max(newValue, self.minValue)
+    end
+    
+    if self.onChange then
+        self:onChange(self.minValue, self.maxValue)
+    end
+end
+
+function RangeSlider:handleDrag(x, y)
+    if self.enabled then
+        local absX, absY = self:getAbsolutePos()
+        local relX = x - absX + 1
+        self:updateValue(relX)
+    end
+end
+
 -- ProgressBar Widget
 local ProgressBar = setmetatable({}, {__index = Widget})
 ProgressBar.__index = ProgressBar
@@ -2006,6 +2164,264 @@ function Canvas:clear(color)
         end
         for x = 1, self.width do
             self.pixels[y][x] = {bg = color}
+        end
+    end
+end
+
+-- Chart Widget
+local Chart = setmetatable({}, {__index = Widget})
+Chart.__index = Chart
+
+function Chart:new(props)
+    local chart = Widget.new(self, props)
+    chart.data = props.data or {}
+    chart.chartType = props.chartType or "line" -- "line", "bar", "scatter"
+    chart.title = props.title or ""
+    chart.xLabel = props.xLabel or ""
+    chart.yLabel = props.yLabel or ""
+    chart.background = props.background or colors.black
+    chart.axisColor = props.axisColor or colors.lightGray
+    chart.dataColor = props.dataColor or colors.cyan
+    chart.titleColor = props.titleColor or colors.white
+    chart.labelColor = props.labelColor or colors.lightGray
+    chart.showGrid = props.showGrid ~= false
+    chart.gridColor = props.gridColor or colors.gray
+    chart.autoScale = props.autoScale ~= false
+    chart.minY = props.minY
+    chart.maxY = props.maxY
+    chart.minX = props.minX
+    chart.maxX = props.maxX
+    
+    if not props.width then
+        chart.width = 20
+    end
+    if not props.height then
+        chart.height = 10
+    end
+    
+    return chart
+end
+
+function Chart:render()
+    local absX, absY = self:getAbsolutePos()
+    
+    -- Clear background
+    term.setBackgroundColor(self.background)
+    for y = 0, self.height - 1 do
+        term.setCursorPos(absX, absY + y)
+        term.write(string.rep(" ", self.width))
+    end
+    
+    if #self.data == 0 then
+        -- Show "No Data" message
+        term.setTextColor(self.labelColor)
+        term.setCursorPos(absX + math.floor(self.width / 2) - 3, absY + math.floor(self.height / 2))
+        term.write("No Data")
+        return
+    end
+    
+    -- Calculate data bounds
+    local minX, maxX, minY, maxY = self:calculateBounds()
+    
+    -- Chart area (leave space for axes and labels)
+    local chartX = absX + 3
+    local chartY = absY + 1
+    local chartWidth = self.width - 4
+    local chartHeight = self.height - 3
+    
+    -- Draw title
+    if self.title ~= "" then
+        term.setTextColor(self.titleColor)
+        term.setCursorPos(absX + math.floor((self.width - #self.title) / 2), absY)
+        term.write(self.title)
+        chartY = chartY + 1
+        chartHeight = chartHeight - 1
+    end
+    
+    -- Draw grid
+    if self.showGrid then
+        term.setTextColor(self.gridColor)
+        for x = 0, chartWidth - 1, math.max(1, math.floor(chartWidth / 5)) do
+            for y = 0, chartHeight - 1 do
+                term.setCursorPos(chartX + x, chartY + y)
+                term.write(".")
+            end
+        end
+        for y = 0, chartHeight - 1, math.max(1, math.floor(chartHeight / 4)) do
+            for x = 0, chartWidth - 1 do
+                term.setCursorPos(chartX + x, chartY + y)
+                term.write(".")
+            end
+        end
+    end
+    
+    -- Draw axes
+    term.setTextColor(self.axisColor)
+    -- Y axis
+    for y = 0, chartHeight - 1 do
+        term.setCursorPos(chartX - 1, chartY + y)
+        term.write("|")
+    end
+    -- X axis
+    for x = 0, chartWidth - 1 do
+        term.setCursorPos(chartX + x, chartY + chartHeight)
+        term.write("-")
+    end
+    -- Origin
+    term.setCursorPos(chartX - 1, chartY + chartHeight)
+    term.write("+")
+    
+    -- Draw data based on chart type
+    if self.chartType == "line" then
+        self:drawLineChart(chartX, chartY, chartWidth, chartHeight, minX, maxX, minY, maxY)
+    elseif self.chartType == "bar" then
+        self:drawBarChart(chartX, chartY, chartWidth, chartHeight, minX, maxX, minY, maxY)
+    elseif self.chartType == "scatter" then
+        self:drawScatterChart(chartX, chartY, chartWidth, chartHeight, minX, maxX, minY, maxY)
+    end
+    
+    -- Draw labels
+    if self.xLabel ~= "" then
+        term.setTextColor(self.labelColor)
+        term.setCursorPos(absX + math.floor((self.width - #self.xLabel) / 2), absY + self.height - 1)
+        term.write(self.xLabel)
+    end
+    
+    if self.yLabel ~= "" then
+        term.setTextColor(self.labelColor)
+        term.setCursorPos(absX, absY + math.floor(self.height / 2))
+        term.write(self.yLabel)
+    end
+    
+    term.setBackgroundColor(colors.black)
+end
+
+function Chart:calculateBounds()
+    local minX, maxX, minY, maxY = math.huge, -math.huge, math.huge, -math.huge
+    
+    for _, point in ipairs(self.data) do
+        local x, y = point.x or point[1] or 0, point.y or point[2] or 0
+        if x < minX then minX = x end
+        if x > maxX then maxX = x end
+        if y < minY then minY = y end
+        if y > maxY then maxY = y end
+    end
+    
+    -- Use provided bounds if not auto-scaling
+    if not self.autoScale then
+        minX = self.minX or minX
+        maxX = self.maxX or maxX
+        minY = self.minY or minY
+        maxY = self.maxY or maxY
+    end
+    
+    -- Add padding if range is too small
+    if maxX - minX < 0.1 then
+        maxX = maxX + 0.5
+        minX = minX - 0.5
+    end
+    if maxY - minY < 0.1 then
+        maxY = maxY + 0.5
+        minY = minY - 0.5
+    end
+    
+    return minX, maxX, minY, maxY
+end
+
+function Chart:drawLineChart(chartX, chartY, chartWidth, chartHeight, minX, maxX, minY, maxY)
+    term.setTextColor(self.dataColor)
+    
+    local lastScreenX, lastScreenY = nil, nil
+    
+    for i, point in ipairs(self.data) do
+        local x, y = point.x or point[1] or 0, point.y or point[2] or 0
+        
+        -- Convert to screen coordinates
+        local screenX = chartX + math.floor((x - minX) / (maxX - minX) * (chartWidth - 1))
+        local screenY = chartY + chartHeight - 1 - math.floor((y - minY) / (maxY - minY) * (chartHeight - 1))
+        
+        if screenX >= chartX and screenX < chartX + chartWidth and
+           screenY >= chartY and screenY < chartY + chartHeight then
+            
+            -- Draw point
+            term.setCursorPos(screenX, screenY)
+            term.write("*")
+            
+            -- Draw line to previous point
+            if lastScreenX and lastScreenY then
+                self:drawLine(lastScreenX, lastScreenY, screenX, screenY)
+            end
+            
+            lastScreenX, lastScreenY = screenX, screenY
+        end
+    end
+end
+
+function Chart:drawBarChart(chartX, chartY, chartWidth, chartHeight, minX, maxX, minY, maxY)
+    term.setTextColor(self.dataColor)
+    
+    local barWidth = math.max(1, math.floor(chartWidth / #self.data))
+    
+    for i, point in ipairs(self.data) do
+        local x, y = point.x or point[1] or i, point.y or point[2] or 0
+        
+        local barX = chartX + (i - 1) * barWidth
+        local barHeight = math.floor((y - minY) / (maxY - minY) * chartHeight)
+        local barTop = chartY + chartHeight - barHeight
+        
+        -- Draw bar
+        for bx = 0, barWidth - 1 do
+            for by = 0, barHeight - 1 do
+                if barX + bx < chartX + chartWidth then
+                    term.setCursorPos(barX + bx, barTop + by)
+                    term.write("#")
+                end
+            end
+        end
+    end
+end
+
+function Chart:drawScatterChart(chartX, chartY, chartWidth, chartHeight, minX, maxX, minY, maxY)
+    term.setTextColor(self.dataColor)
+    
+    for i, point in ipairs(self.data) do
+        local x, y = point.x or point[1] or 0, point.y or point[2] or 0
+        
+        -- Convert to screen coordinates
+        local screenX = chartX + math.floor((x - minX) / (maxX - minX) * (chartWidth - 1))
+        local screenY = chartY + chartHeight - 1 - math.floor((y - minY) / (maxY - minY) * (chartHeight - 1))
+        
+        if screenX >= chartX and screenX < chartX + chartWidth and
+           screenY >= chartY and screenY < chartY + chartHeight then
+            term.setCursorPos(screenX, screenY)
+            term.write("o")
+        end
+    end
+end
+
+function Chart:drawLine(x1, y1, x2, y2)
+    -- Simple line drawing using Bresenham's algorithm (simplified)
+    local dx = math.abs(x2 - x1)
+    local dy = math.abs(y2 - y1)
+    local x, y = x1, y1
+    local n = 1 + dx + dy
+    local x_inc = (x2 > x1) and 1 or -1
+    local y_inc = (y2 > y1) and 1 or -1
+    local error = dx - dy
+    
+    dx = dx * 2
+    dy = dy * 2
+    
+    for _ = 1, n do
+        term.setCursorPos(x, y)
+        term.write("-")
+        
+        if error > 0 then
+            x = x + x_inc
+            error = error - dy
+        else
+            y = y + y_inc
+            error = error + dx
         end
     end
 end
@@ -3684,6 +4100,15 @@ function PixelUI.slider(props)
     return slider
 end
 
+function PixelUI.rangeSlider(props)
+    local rangeslider = RangeSlider:new(props)
+    table.insert(widgets, rangeslider)
+    if rootContainer then
+        rootContainer:addChild(rangeslider)
+    end
+    return rangeslider
+end
+
 function PixelUI.progressBar(props)
     local progressbar = ProgressBar:new(props)
     table.insert(widgets, progressbar)
@@ -3763,6 +4188,15 @@ function PixelUI.canvas(props)
         rootContainer:addChild(canvas)
     end
     return canvas
+end
+
+function PixelUI.chart(props)
+    local chart = Chart:new(props)
+    table.insert(widgets, chart)
+    if rootContainer then
+        rootContainer:addChild(chart)
+    end
+    return chart
 end
 
 function PixelUI.spacer(props)
@@ -4142,6 +4576,7 @@ PixelUI.Button = Button
 PixelUI.TextBox = TextBox
 PixelUI.CheckBox = CheckBox
 PixelUI.Slider = Slider
+PixelUI.RangeSlider = RangeSlider
 PixelUI.ProgressBar = ProgressBar
 PixelUI.ListView = ListView
 PixelUI.Container = Container
@@ -4151,6 +4586,7 @@ PixelUI.ComboBox = ComboBox
 PixelUI.TabControl = TabControl
 PixelUI.Grid = Grid
 PixelUI.Canvas = Canvas
+PixelUI.Chart = Chart
 PixelUI.Spacer = Spacer
 PixelUI.ScrollBar = ScrollBar
 PixelUI.ContextMenu = ContextMenu

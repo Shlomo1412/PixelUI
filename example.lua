@@ -10,7 +10,7 @@ PixelUI.init()
 -- Demo state and configuration
 local demo = {
     currentFrame = 1,
-    totalFrames = 22,  -- Expanded to include scrollbar and scrollable container demos
+    totalFrames = 24,  -- Increased to include RangeSlider and Chart demos
     frames = {
         {name = "Label", component = "label", 
          description = "Static text display widget with alignment and color options"},
@@ -22,6 +22,8 @@ local demo = {
          description = "Toggle checkbox with labels and state management"},
         {name = "Slider", component = "slider", 
          description = "Value slider with range and step controls"},
+        {name = "RangeSlider", component = "rangeSlider", 
+         description = "Dual-handle range slider for selecting value ranges"},
         {name = "ProgressBar", component = "progressBar", 
          description = "Visual progress indicator with customizable styling"},
         {name = "ListView", component = "listView", 
@@ -42,6 +44,8 @@ local demo = {
          description = "Visual grouping container with border and title"},
         {name = "Canvas", component = "canvas", 
          description = "Custom drawing surface for pixel-level graphics"},
+        {name = "Chart", component = "chart", 
+         description = "Data visualization with line, bar, and scatter chart types"},
         {name = "MsgBox", component = "msgBox", 
          description = "Modal message box dialog with buttons and icons"},
         {name = "ColorPicker", component = "colorPicker", 
@@ -62,6 +66,8 @@ local demo = {
         textInput = "",
         checkboxState = false,
         sliderValue = 50,
+        rangeSliderMin = 25,
+        rangeSliderMax = 75,
         progressValue = 35,
         selectedItem = 1,
         listItems = {"Apple", "Banana", "Cherry", "Date", "Elderberry", "Fig", "Grape"},
@@ -78,6 +84,12 @@ local demo = {
         showMsgBox = false,
         selectedColor = colors.white,
         colorPickerVisible = false,
+        -- Chart state
+        chartType = "line",
+        chartData = {
+            {x = 1, y = 10}, {x = 2, y = 25}, {x = 3, y = 15}, {x = 4, y = 30}, 
+            {x = 5, y = 20}, {x = 6, y = 35}, {x = 7, y = 28}, {x = 8, y = 40}
+        },
         -- Loading indicator states
         loadingProgress = 25,
         spinnerActive = true,
@@ -191,6 +203,8 @@ function demo:createComponentDemo(component)
         self:createCheckBoxDemo()
     elseif component == "slider" then
         self:createSliderDemo()
+    elseif component == "rangeSlider" then
+        self:createRangeSliderDemo()
     elseif component == "progressBar" then
         self:createProgressBarDemo()
     elseif component == "listView" then
@@ -211,6 +225,8 @@ function demo:createComponentDemo(component)
         self:createGroupBoxDemo()
     elseif component == "canvas" then
         self:createCanvasDemo()
+    elseif component == "chart" then
+        self:createChartDemo()
     elseif component == "msgBox" then
         self:createMsgBoxDemo()
     elseif component == "colorPicker" then
@@ -449,6 +465,80 @@ function demo:createSliderDemo()
         height = 1,
         onClick = function()
             self.state.sliderValue = math.random(0, 100)
+            self:refreshFrame()
+        end
+    })
+end
+
+-- RangeSlider demonstration
+function demo:createRangeSliderDemo()
+    PixelUI.label({
+        x = 2, y = 6,
+        text = "Range Slider (Range: " .. self.state.rangeSliderMin .. " - " .. self.state.rangeSliderMax .. "):",
+        color = colors.white
+    })
+    
+    PixelUI.rangeSlider({
+        x = 2, y = 8,
+        width = 30,
+        minValue = self.state.rangeSliderMin,
+        maxValue = self.state.rangeSliderMax,
+        rangeMin = 0,
+        rangeMax = 100,
+        step = 5,
+        onChange = function(self, minVal, maxVal)
+            demo.state.rangeSliderMin = minVal
+            demo.state.rangeSliderMax = maxVal
+            demo:refreshFrame()
+        end
+    })
+    
+    -- Visual representation of selected range
+    local totalWidth = 30
+    local minPos = math.floor(self.state.rangeSliderMin / 100 * totalWidth)
+    local maxPos = math.floor(self.state.rangeSliderMax / 100 * totalWidth)
+    local beforeRange = string.rep(".", minPos)
+    local withinRange = string.rep("=", maxPos - minPos)
+    local afterRange = string.rep(".", totalWidth - maxPos)
+    
+    PixelUI.label({
+        x = 2, y = 10,
+        text = "Visual: [" .. beforeRange .. withinRange .. afterRange .. "]",
+        color = colors.cyan
+    })
+    
+    PixelUI.label({
+        x = 2, y = 11,
+        text = "Range size: " .. (self.state.rangeSliderMax - self.state.rangeSliderMin),
+        color = colors.lightGray
+    })
+    
+    PixelUI.button({
+        x = 2, y = 13,
+        text = "Random Range",
+        background = colors.orange,
+        color = colors.white,
+        width = 14,
+        height = 1,
+        onClick = function()
+            local min = math.random(0, 70)
+            local max = math.random(min + 10, 100)
+            self.state.rangeSliderMin = min
+            self.state.rangeSliderMax = max
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 18, y = 13,
+        text = "Reset",
+        background = colors.gray,
+        color = colors.white,
+        width = 8,
+        height = 1,
+        onClick = function()
+            self.state.rangeSliderMin = 25
+            self.state.rangeSliderMax = 75
             self:refreshFrame()
         end
     })
@@ -1086,6 +1176,118 @@ function demo:createCanvasDemo()
         width = 10,
         height = 1,
         onClick = function()
+            self:refreshFrame()
+        end
+    })
+end
+
+-- Chart demonstration
+function demo:createChartDemo()
+    PixelUI.label({
+        x = 2, y = 6,
+        text = "Chart Widget (" .. self.state.chartType .. " chart):",
+        color = colors.white
+    })
+    
+    PixelUI.chart({
+        x = 2, y = 8,
+        width = 35,
+        height = 10,
+        data = self.state.chartData,
+        chartType = self.state.chartType,
+        title = "Sample Data",
+        xLabel = "Time",
+        yLabel = "Value",
+        dataColor = colors.cyan,
+        showGrid = true
+    })
+    
+    -- Chart type buttons
+    PixelUI.label({
+        x = 40, y = 8,
+        text = "Chart Types:",
+        color = colors.lightGray
+    })
+    
+    PixelUI.button({
+        x = 40, y = 10,
+        text = "Line",
+        background = self.state.chartType == "line" and colors.green or colors.gray,
+        color = colors.white,
+        width = 8,
+        height = 1,
+        onClick = function()
+            self.state.chartType = "line"
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 40, y = 11,
+        text = "Bar",
+        background = self.state.chartType == "bar" and colors.green or colors.gray,
+        color = colors.white,
+        width = 8,
+        height = 1,
+        onClick = function()
+            self.state.chartType = "bar"
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 40, y = 12,
+        text = "Scatter",
+        background = self.state.chartType == "scatter" and colors.green or colors.gray,
+        color = colors.white,
+        width = 8,
+        height = 1,
+        onClick = function()
+            self.state.chartType = "scatter"
+            self:refreshFrame()
+        end
+    })
+    
+    -- Data manipulation buttons
+    PixelUI.button({
+        x = 40, y = 14,
+        text = "New Data",
+        background = colors.orange,
+        color = colors.white,
+        width = 10,
+        height = 1,
+        onClick = function()
+            self.state.chartData = {}
+            for i = 1, 8 do
+                table.insert(self.state.chartData, {x = i, y = math.random(5, 45)})
+            end
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 40, y = 15,
+        text = "Add Point",
+        background = colors.blue,
+        color = colors.white,
+        width = 10,
+        height = 1,
+        onClick = function()
+            local nextX = #self.state.chartData + 1
+            table.insert(self.state.chartData, {x = nextX, y = math.random(5, 45)})
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 40, y = 16,
+        text = "Clear",
+        background = colors.red,
+        color = colors.white,
+        width = 10,
+        height = 1,
+        onClick = function()
+            self.state.chartData = {}
             self:refreshFrame()
         end
     })
