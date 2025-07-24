@@ -10,7 +10,7 @@ PixelUI.init()
 -- Demo state and configuration
 local demo = {
     currentFrame = 1,
-    totalFrames = 24,  -- Increased to include RangeSlider and Chart demos
+    totalFrames = 26,  -- Increased to include ProgressRing and CircularProgressBar demos
     frames = {
         {name = "Label", component = "label", 
          description = "Static text display widget with alignment and color options"},
@@ -26,6 +26,10 @@ local demo = {
          description = "Dual-handle range slider for selecting value ranges"},
         {name = "ProgressBar", component = "progressBar", 
          description = "Visual progress indicator with customizable styling"},
+        {name = "ProgressRing", component = "progressRing", 
+         description = "Circular progress indicator with ring-style visualization"},
+        {name = "CircularProgressBar", component = "circularProgressBar", 
+         description = "Advanced circular progress with multiple styles and animations"},
         {name = "ListView", component = "listView", 
          description = "Scrollable list with item selection and events"},
         {name = "Container", component = "container", 
@@ -69,6 +73,10 @@ local demo = {
         rangeSliderMin = 25,
         rangeSliderMax = 75,
         progressValue = 35,
+        progressRingValue = 65,
+        circularProgressValue = 80,
+        circularProgressStyle = "filled",
+        circularProgressAnimated = false,
         selectedItem = 1,
         listItems = {"Apple", "Banana", "Cherry", "Date", "Elderberry", "Fig", "Grape"},
         buttonClicks = 0,
@@ -208,6 +216,10 @@ function demo:createComponentDemo(component)
         self:createRangeSliderDemo()
     elseif component == "progressBar" then
         self:createProgressBarDemo()
+    elseif component == "progressRing" then
+        self:createProgressRingDemo()
+    elseif component == "circularProgressBar" then
+        self:createCircularProgressBarDemo()
     elseif component == "listView" then
         self:createListViewDemo()
     elseif component == "container" then
@@ -599,6 +611,268 @@ function demo:createProgressBarDemo()
             self.state.progressValue = 0
             self:refreshFrame()
         end
+    })
+end
+
+-- ProgressRing demonstration
+function demo:createProgressRingDemo()
+    PixelUI.label({
+        x = 2, y = 6,
+        text = "Progress Ring (" .. self.state.progressRingValue .. "%):",
+        color = colors.white
+    })
+    
+    -- Main progress ring
+    PixelUI.progressRing({
+        x = 2, y = 8,
+        width = 11,
+        height = 11,
+        value = self.state.progressRingValue,
+        max = 100,
+        color = colors.cyan,
+        background = colors.gray,
+        showValue = true,
+        showMarkers = true,
+        markerColor = colors.white
+    })
+    
+    -- Smaller ring with different color
+    PixelUI.progressRing({
+        x = 16, y = 8,
+        width = 9,
+        height = 9,
+        value = self.state.progressRingValue * 0.8,
+        max = 100,
+        color = colors.lime,
+        background = colors.lightGray,
+        showValue = true,
+        valueFormat = "%.0f"
+    })
+    
+    -- Ring with custom start angle
+    PixelUI.progressRing({
+        x = 28, y = 8,
+        width = 9,
+        height = 9,
+        value = self.state.progressRingValue * 1.2,
+        max = 100,
+        color = colors.orange,
+        background = colors.gray,
+        startAngle = 90,
+        clockwise = false,
+        showValue = false
+    })
+    
+    -- Control buttons
+    PixelUI.button({
+        x = 40, y = 8,
+        text = "+10%",
+        background = colors.green,
+        color = colors.white,
+        width = 8,
+        height = 1,
+        onClick = function()
+            self.state.progressRingValue = math.min(100, self.state.progressRingValue + 10)
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 40, y = 10,
+        text = "-10%",
+        background = colors.orange,
+        color = colors.white,
+        width = 8,
+        height = 1,
+        onClick = function()
+            self.state.progressRingValue = math.max(0, self.state.progressRingValue - 10)
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 40, y = 12,
+        text = "Random",
+        background = colors.purple,
+        color = colors.white,
+        width = 8,
+        height = 1,
+        onClick = function()
+            self.state.progressRingValue = math.random(0, 100)
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 40, y = 14,
+        text = "Reset",
+        background = colors.red,
+        color = colors.white,
+        width = 8,
+        height = 1,
+        onClick = function()
+            self.state.progressRingValue = 65
+            self:refreshFrame()
+        end
+    })
+    
+    -- Info labels
+    PixelUI.label({
+        x = 2, y = 15,
+        text = "Features: Value display, markers, custom angles, colors",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 16,
+        text = "Left: Full featured | Center: Compact | Right: Custom angle",
+        color = colors.lightGray
+    })
+end
+
+-- CircularProgressBar demonstration
+function demo:createCircularProgressBarDemo()
+    PixelUI.label({
+        x = 2, y = 6,
+        text = "Circular Progress Bar (" .. self.state.circularProgressValue .. "%, " .. 
+              self.state.circularProgressStyle .. " style):",
+        color = colors.white
+    })
+    
+    -- Main circular progress with title
+    PixelUI.circularProgressBar({
+        x = 2, y = 8,
+        width = 13,
+        height = 13,
+        value = self.state.circularProgressValue,
+        max = 100,
+        color = colors.cyan,
+        style = self.state.circularProgressStyle,
+        showTitle = true,
+        title = "Loading",
+        showValue = true,
+        animated = self.state.circularProgressAnimated,
+        segments = 12
+    })
+    
+    -- Segmented style example
+    PixelUI.circularProgressBar({
+        x = 18, y = 8,
+        width = 11,
+        height = 11,
+        value = self.state.circularProgressValue * 0.7,
+        max = 100,
+        color = colors.lime,
+        style = "segmented",
+        showValue = true,
+        segments = 8
+    })
+    
+    -- Dots style example
+    PixelUI.circularProgressBar({
+        x = 32, y = 8,
+        width = 11,
+        height = 11,
+        value = self.state.circularProgressValue * 0.9,
+        max = 100,
+        color = colors.orange,
+        style = "dots",
+        showValue = true,
+        segments = 10
+    })
+    
+    -- Control buttons - Progress
+    PixelUI.label({
+        x = 2, y = 16,
+        text = "Progress Controls:",
+        color = colors.white
+    })
+    
+    PixelUI.button({
+        x = 2, y = 17,
+        text = "+10%",
+        background = colors.green,
+        color = colors.white,
+        width = 6,
+        height = 1,
+        onClick = function()
+            self.state.circularProgressValue = math.min(100, self.state.circularProgressValue + 10)
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 10, y = 17,
+        text = "-10%",
+        background = colors.orange,
+        color = colors.white,
+        width = 6,
+        height = 1,
+        onClick = function()
+            self.state.circularProgressValue = math.max(0, self.state.circularProgressValue - 10)
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 18, y = 17,
+        text = "Random",
+        background = colors.purple,
+        color = colors.white,
+        width = 8,
+        height = 1,
+        onClick = function()
+            self.state.circularProgressValue = math.random(0, 100)
+            self:refreshFrame()
+        end
+    })
+    
+    -- Style controls
+    PixelUI.label({
+        x = 30, y = 16,
+        text = "Style Controls:",
+        color = colors.white
+    })
+    
+    PixelUI.button({
+        x = 30, y = 17,
+        text = "Style",
+        background = self.state.circularProgressStyle == "filled" and colors.blue or colors.gray,
+        color = colors.white,
+        width = 6,
+        height = 1,
+        onClick = function()
+            local styles = {"filled", "segmented", "dots"}
+            local currentIndex = 1
+            for i, style in ipairs(styles) do
+                if style == self.state.circularProgressStyle then
+                    currentIndex = i
+                    break
+                end
+            end
+            self.state.circularProgressStyle = styles[(currentIndex % #styles) + 1]
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 38, y = 17,
+        text = self.state.circularProgressAnimated and "Stop" or "Animate",
+        background = self.state.circularProgressAnimated and colors.red or colors.blue,
+        color = colors.white,
+        width = 8,
+        height = 1,
+        onClick = function()
+            self.state.circularProgressAnimated = not self.state.circularProgressAnimated
+            self:refreshFrame()
+        end
+    })
+    
+    -- Info labels
+    PixelUI.label({
+        x = 2, y = 18,
+        text = "Styles: Filled (smooth), Segmented (discrete), Dots (individual points)",
+        color = colors.lightGray
     })
 end
 
@@ -1890,64 +2164,196 @@ function demo:createAnimationDemo()
         color = colors.white
     })
     
-    -- Animated box
-    local box = PixelUI.button({
-        x = 5, y = 10,
-        width = 10, height = 3,
+    -- Main animated button (wider and more sophisticated)
+    local mainBox = PixelUI.button({
+        x = 5, y = 9,
+        width = 16, height = 3,
         text = "Animate Me!",
         background = colors.purple,
         color = colors.white,
         onClick = function(self)
-            -- Animate position, color, and width
+            -- Complex multi-stage animation sequence
+            -- Stage 1: Slide right and expand
             PixelUI.animate(self, {
-                to = { x = 30, width = 18 },
-                duration = 1.2,
+                to = { x = 25, width = 20 },
+                duration = 0.8,
+                easing = "outQuad",
+                onComplete = function(w)
+                    w.text = "Stage 2!"
+                    -- Stage 2: Change color and bounce
+                    PixelUI.animate(w, {
+                        to = { background = colors.cyan, y = 6 },
+                        duration = 0.6,
+                        easing = "outQuad",
+                        onComplete = function(w2)
+                            w2.text = "Bouncing!"
+                            -- Stage 3: Bounce down
+                            PixelUI.animate(w2, {
+                                to = { y = 12 },
+                                duration = 0.4,
+                                easing = "inQuad",
+                                onComplete = function(w3)
+                                    w3.text = "Returning..."
+                                    -- Stage 4: Return to original position and size
+                                    PixelUI.animate(w3, {
+                                        to = { x = 5, width = 16, y = 9, background = colors.purple },
+                                        duration = 1.0,
+                                        easing = "inOutQuad",
+                                        onComplete = function(w4)
+                                            w4.text = "Animate Me!"
+                                        end
+                                    })
+                                end
+                            })
+                        end
+                    })
+                end
+            })
+        end
+    })
+    
+    -- Secondary animated elements
+    local smallBox1 = PixelUI.button({
+        x = 2, y = 13,
+        width = 8, height = 1,
+        text = "Spin 1",
+        background = colors.orange,
+        color = colors.white,
+        onClick = function(self)
+            -- Spinning color animation
+            local colors_list = {colors.orange, colors.red, colors.pink, colors.magenta, colors.purple, colors.blue, colors.cyan, colors.lime, colors.green, colors.yellow}
+            local currentIndex = 1
+            local function spinColor()
+                PixelUI.animate(self, {
+                    to = { background = colors_list[currentIndex] },
+                    duration = 0.1,
+                    onComplete = function()
+                        currentIndex = currentIndex % #colors_list + 1
+                        if currentIndex <= #colors_list then
+                            spinColor()
+                        end
+                    end
+                })
+            end
+            spinColor()
+        end
+    })
+    
+    local smallBox2 = PixelUI.button({
+        x = 12, y = 13,
+        width = 8, height = 1,
+        text = "Wave",
+        background = colors.green,
+        color = colors.white,
+        onClick = function(self)
+            -- Wave motion animation
+            local originalX = self.x
+            PixelUI.animate(self, {
+                to = { x = originalX + 5 },
+                duration = 0.3,
+                easing = function(t) return math.sin(t * math.pi * 2) * 0.5 + 0.5 end,
+                onComplete = function(w)
+                    PixelUI.animate(w, {
+                        to = { x = originalX - 3 },
+                        duration = 0.3,
+                        easing = function(t) return math.sin(t * math.pi * 2) * 0.5 + 0.5 end,
+                        onComplete = function(w2)
+                            PixelUI.animate(w2, {
+                                to = { x = originalX },
+                                duration = 0.2,
+                                easing = "outQuad"
+                            })
+                        end
+                    })
+                end
+            })
+        end
+    })
+    
+    local smallBox3 = PixelUI.button({
+        x = 22, y = 13,
+        width = 8, height = 1,
+        text = "Pulse",
+        background = colors.red,
+        color = colors.white,
+        onClick = function(self)
+            -- Pulsing size animation
+            local originalWidth = self.width
+            PixelUI.animate(self, {
+                to = { width = originalWidth + 4 },
+                duration = 0.4,
                 easing = "outQuad",
                 onComplete = function(w)
                     PixelUI.animate(w, {
-                        to = { x = 5, width = 10 },
-                        duration = 1.2,
-                        easing = "inQuad"
-                    })
-                end
-            })
-            -- Animate color
-            PixelUI.animate(self, {
-                to = { background = colors.orange },
-                duration = 0.6,
-                easing = "linear",
-                onComplete = function(w)
-                    PixelUI.animate(w, {
-                        to = { background = colors.purple },
-                        duration = 0.6
+                        to = { width = originalWidth - 2 },
+                        duration = 0.3,
+                        easing = "inQuad",
+                        onComplete = function(w2)
+                            PixelUI.animate(w2, {
+                                to = { width = originalWidth },
+                                duration = 0.3,
+                                easing = "outQuad"
+                            })
+                        end
                     })
                 end
             })
         end
     })
     
-    -- Animate on load (bounce)
-    PixelUI.animate(box, {
-        to = { y = 7 },
-        duration = 0.5,
-        easing = function(t) return math.sin(t * math.pi) end,
-        onComplete = function(w)
-            PixelUI.animate(w, {
-                to = { y = 10 },
-                duration = 0.5,
-                easing = function(t) return math.sin(t * math.pi) end
-            })
+    local resetButton = PixelUI.button({
+        x = 32, y = 13,
+        width = 10, height = 1,
+        text = "Reset All",
+        background = colors.gray,
+        color = colors.white,
+        onClick = function(self)
+            -- Reset all animated elements to original state
+            mainBox.x = 5
+            mainBox.y = 9
+            mainBox.width = 16
+            mainBox.background = colors.purple
+            mainBox.text = "Animate Me!"
+            
+            smallBox1.background = colors.orange
+            smallBox2.x = 12
+            smallBox3.width = 8
+            
+            demo:refreshFrame()
         end
     })
     
+    -- Entrance animation for main button (bounce in from top)
+    mainBox.y = 2
+    PixelUI.animate(mainBox, {
+        to = { y = 9 },
+        duration = 0.8,
+        easing = function(t) 
+            -- Bounce easing function
+            if t < 0.5 then
+                return 2 * t * t
+            else
+                return -1 + (4 - 2 * t) * t
+            end
+        end
+    })
+    
+    -- Instructions and info
     PixelUI.label({
         x = 2, y = 15,
-        text = "Click the purple button to animate!",
+        text = "Click buttons to see different animation types!",
         color = colors.lime
     })
+    
+    PixelUI.label({
+        x = 2, y = 16,
+        text = "Main button: Multi-stage sequence with easing",
+        color = colors.lightGray
+    })
+    
     PixelUI.label({
         x = 2, y = 17,
-        text = "Animations: position, size, color, custom easing, chain, and more.",
+        text = "Small buttons: Color spin, wave motion, size pulse",
         color = colors.lightGray
     })
 end

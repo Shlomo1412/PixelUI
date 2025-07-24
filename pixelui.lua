@@ -1206,6 +1206,312 @@ function ProgressBar:setIntermediate(enabled)
     end
 end
 
+-- ProgressRing Widget
+local ProgressRing = setmetatable({}, {__index = Widget})
+ProgressRing.__index = ProgressRing
+
+function ProgressRing:new(props)
+    local progressring = Widget.new(self, props)
+    progressring.value = props.value or 0
+    progressring.max = props.max or 100
+    progressring.color = props.color or colors.green
+    progressring.background = props.background or colors.gray
+    progressring.centerColor = props.centerColor or colors.black
+    progressring.showValue = props.showValue ~= false
+    progressring.valueFormat = props.valueFormat or "%.0f%%"
+    progressring.thickness = props.thickness or 1
+    progressring.startAngle = props.startAngle or 0 -- Starting angle in degrees (0 = top)
+    progressring.clockwise = props.clockwise ~= false
+    progressring.showMarkers = props.showMarkers or false
+    progressring.markerColor = props.markerColor or colors.white
+    
+    -- Default size for ring
+    if not props.width then
+        progressring.width = 9
+    end
+    if not props.height then
+        progressring.height = 9
+    end
+    
+    -- Ensure odd dimensions for centered ring
+    if progressring.width % 2 == 0 then progressring.width = progressring.width + 1 end
+    if progressring.height % 2 == 0 then progressring.height = progressring.height + 1 end
+    
+    progressring.radius = math.min(progressring.width, progressring.height) / 2 - 1
+    progressring.centerX = math.floor(progressring.width / 2) + 1
+    progressring.centerY = math.floor(progressring.height / 2) + 1
+    
+    return progressring
+end
+
+function ProgressRing:render()
+    local absX, absY = self:getAbsolutePos()
+    
+    -- Clear background
+    term.setBackgroundColor(self.centerColor)
+    for y = 0, self.height - 1 do
+        term.setCursorPos(absX, absY + y)
+        term.write(string.rep(" ", self.width))
+    end
+    
+    local progress = math.min(self.value / self.max, 1)
+    local progressAngle = progress * 360
+    
+    -- Draw ring using character-based approach
+    for y = 1, self.height do
+        for x = 1, self.width do
+            local dx = x - self.centerX
+            local dy = y - self.centerY
+            local distance = math.sqrt(dx * dx + dy * dy)
+            
+            -- Check if point is on the ring
+            if distance >= self.radius - self.thickness and distance <= self.radius then
+                -- Calculate angle for this point
+                local angle = math.deg(math.atan2(dy, dx)) + 90 -- Adjust so 0° is at top
+                if angle < 0 then angle = angle + 360 end
+                
+                -- Adjust for start angle and direction
+                local adjustedAngle = self.clockwise and (angle - self.startAngle) or (self.startAngle - angle)
+                if adjustedAngle < 0 then adjustedAngle = adjustedAngle + 360 end
+                if adjustedAngle > 360 then adjustedAngle = adjustedAngle - 360 end
+                
+                local color = self.background
+                if adjustedAngle <= progressAngle then
+                    color = self.color
+                end
+                
+                -- Draw markers at quarters if enabled
+                if self.showMarkers and (adjustedAngle % 90 < 5 or adjustedAngle % 90 > 355) then
+                    color = self.markerColor
+                end
+                
+                term.setBackgroundColor(color)
+                term.setCursorPos(absX + x - 1, absY + y - 1)
+                term.write(" ")
+            end
+        end
+    end
+    
+    -- Draw center value if enabled
+    if self.showValue then
+        local valueText = string.format(self.valueFormat, (self.value / self.max) * 100)
+        local textX = absX + self.centerX - math.floor(#valueText / 2) - 1
+        local textY = absY + self.centerY - 1
+        
+        term.setBackgroundColor(self.centerColor)
+        term.setTextColor(colors.white)
+        term.setCursorPos(textX, textY)
+        term.write(valueText)
+    end
+    
+    term.setBackgroundColor(colors.black)
+end
+
+-- CircularProgressBar Widget
+local CircularProgressBar = setmetatable({}, {__index = Widget})
+CircularProgressBar.__index = CircularProgressBar
+
+function CircularProgressBar:new(props)
+    local circularprogress = Widget.new(self, props)
+    circularprogress.value = props.value or 0
+    circularprogress.max = props.max or 100
+    circularprogress.color = props.color or colors.cyan
+    circularprogress.background = props.background or colors.gray
+    circularprogress.centerColor = props.centerColor or colors.black
+    circularprogress.showValue = props.showValue ~= false
+    circularprogress.valueFormat = props.valueFormat or "%.0f%%"
+    circularprogress.showTitle = props.showTitle or false
+    circularprogress.title = props.title or "Progress"
+    circularprogress.titleColor = props.titleColor or colors.white
+    circularprogress.style = props.style or "filled" -- "filled", "segmented", "dots"
+    circularprogress.segments = props.segments or 8
+    circularprogress.animated = props.animated or false
+    circularprogress.animationSpeed = props.animationSpeed or 1
+    circularprogress.lastAnimationUpdate = os.clock()
+    circularprogress.animationOffset = 0
+    
+    -- Default size for circular progress
+    if not props.width then
+        circularprogress.width = 11
+    end
+    if not props.height then
+        circularprogress.height = 11
+    end
+    
+    -- Ensure odd dimensions for centered circle
+    if circularprogress.width % 2 == 0 then circularprogress.width = circularprogress.width + 1 end
+    if circularprogress.height % 2 == 0 then circularprogress.height = circularprogress.height + 1 end
+    
+    circularprogress.radius = math.min(circularprogress.width, circularprogress.height) / 2 - 1
+    circularprogress.centerX = math.floor(circularprogress.width / 2) + 1
+    circularprogress.centerY = math.floor(circularprogress.height / 2) + 1
+    
+    return circularprogress
+end
+
+function CircularProgressBar:render()
+    local absX, absY = self:getAbsolutePos()
+    
+    -- Update animation if enabled
+    if self.animated then
+        local now = os.clock()
+        local deltaTime = now - self.lastAnimationUpdate
+        self.lastAnimationUpdate = now
+        self.animationOffset = (self.animationOffset + deltaTime * self.animationSpeed * 360) % 360
+    end
+    
+    -- Clear background
+    term.setBackgroundColor(self.centerColor)
+    for y = 0, self.height - 1 do
+        term.setCursorPos(absX, absY + y)
+        term.write(string.rep(" ", self.width))
+    end
+    
+    local progress = math.min(self.value / self.max, 1)
+    
+    if self.style == "segmented" then
+        self:drawSegmentedProgress(absX, absY, progress)
+    elseif self.style == "dots" then
+        self:drawDottedProgress(absX, absY, progress)
+    else
+        self:drawFilledProgress(absX, absY, progress)
+    end
+    
+    -- Draw center content
+    self:drawCenterContent(absX, absY)
+    
+    term.setBackgroundColor(colors.black)
+end
+
+function CircularProgressBar:drawFilledProgress(absX, absY, progress)
+    local progressAngle = progress * 360
+    
+    for y = 1, self.height do
+        for x = 1, self.width do
+            local dx = x - self.centerX
+            local dy = y - self.centerY
+            local distance = math.sqrt(dx * dx + dy * dy)
+            
+            -- Check if point is on the circle edge
+            if math.abs(distance - self.radius) <= 0.7 then
+                -- Calculate angle for this point
+                local angle = math.deg(math.atan2(dy, dx)) + 90 -- Adjust so 0° is at top
+                if angle < 0 then angle = angle + 360 end
+                
+                -- Add animation offset if enabled
+                local adjustedAngle = (angle + self.animationOffset) % 360
+                
+                local color = self.background
+                if adjustedAngle <= progressAngle or (self.animated and adjustedAngle <= progressAngle + 30) then
+                    color = self.color
+                end
+                
+                term.setBackgroundColor(color)
+                term.setCursorPos(absX + x - 1, absY + y - 1)
+                term.write(" ")
+            end
+        end
+    end
+end
+
+function CircularProgressBar:drawSegmentedProgress(absX, absY, progress)
+    local filledSegments = math.floor(progress * self.segments)
+    local segmentAngle = 360 / self.segments
+    
+    for segment = 0, self.segments - 1 do
+        local startAngle = segment * segmentAngle
+        local endAngle = (segment + 1) * segmentAngle
+        local color = segment < filledSegments and self.color or self.background
+        
+        -- Add animation effect
+        if self.animated then
+            local animSegment = ((segment - math.floor(self.animationOffset / segmentAngle)) % self.segments)
+            if animSegment < filledSegments then
+                color = self.color
+            end
+        end
+        
+        self:drawSegmentArc(absX, absY, startAngle, endAngle, color)
+    end
+end
+
+function CircularProgressBar:drawDottedProgress(absX, absY, progress)
+    local totalDots = self.segments
+    local filledDots = math.floor(progress * totalDots)
+    local dotAngle = 360 / totalDots
+    
+    for dot = 0, totalDots - 1 do
+        local angle = dot * dotAngle
+        local color = dot < filledDots and self.color or self.background
+        
+        -- Calculate dot position
+        local radians = math.rad(angle - 90) -- Adjust so 0° is at top
+        local dotX = self.centerX + math.cos(radians) * self.radius
+        local dotY = self.centerY + math.sin(radians) * self.radius
+        
+        -- Draw dot
+        if dotX >= 1 and dotX <= self.width and dotY >= 1 and dotY <= self.height then
+            term.setBackgroundColor(color)
+            term.setCursorPos(absX + math.floor(dotX) - 1, absY + math.floor(dotY) - 1)
+            term.write(" ")
+        end
+    end
+end
+
+function CircularProgressBar:drawSegmentArc(absX, absY, startAngle, endAngle, color)
+    for y = 1, self.height do
+        for x = 1, self.width do
+            local dx = x - self.centerX
+            local dy = y - self.centerY
+            local distance = math.sqrt(dx * dx + dy * dy)
+            
+            if math.abs(distance - self.radius) <= 0.7 then
+                local angle = math.deg(math.atan2(dy, dx)) + 90
+                if angle < 0 then angle = angle + 360 end
+                
+                if angle >= startAngle and angle <= endAngle then
+                    term.setBackgroundColor(color)
+                    term.setCursorPos(absX + x - 1, absY + y - 1)
+                    term.write(" ")
+                end
+            end
+        end
+    end
+end
+
+function CircularProgressBar:drawCenterContent(absX, absY)
+    -- Draw title if enabled
+    if self.showTitle and self.title ~= "" then
+        local titleX = absX + self.centerX - math.floor(#self.title / 2) - 1
+        local titleY = absY + self.centerY - 2
+        
+        if titleY >= absY and titleY < absY + self.height then
+            term.setBackgroundColor(self.centerColor)
+            term.setTextColor(self.titleColor)
+            term.setCursorPos(titleX, titleY)
+            term.write(self.title)
+        end
+    end
+    
+    -- Draw value if enabled
+    if self.showValue then
+        local valueText = string.format(self.valueFormat, (self.value / self.max) * 100)
+        local textX = absX + self.centerX - math.floor(#valueText / 2) - 1
+        local textY = absY + self.centerY - 1
+        
+        if self.showTitle then
+            textY = textY + 1 -- Move down if title is shown
+        end
+        
+        if textY >= absY and textY < absY + self.height then
+            term.setBackgroundColor(self.centerColor)
+            term.setTextColor(colors.white)
+            term.setCursorPos(textX, textY)
+            term.write(valueText)
+        end
+    end
+end
+
 -- ListView Widget
 local ListView = setmetatable({}, {__index = Widget})
 ListView.__index = ListView
@@ -4151,6 +4457,24 @@ function PixelUI.progressBar(props)
     return progressbar
 end
 
+function PixelUI.progressRing(props)
+    local progressring = ProgressRing:new(props)
+    table.insert(widgets, progressring)
+    if rootContainer then
+        rootContainer:addChild(progressring)
+    end
+    return progressring
+end
+
+function PixelUI.circularProgressBar(props)
+    local circularprogress = CircularProgressBar:new(props)
+    table.insert(widgets, circularprogress)
+    if rootContainer then
+        rootContainer:addChild(circularprogress)
+    end
+    return circularprogress
+end
+
 function PixelUI.listView(props)
     local listview = ListView:new(props)
     table.insert(widgets, listview)
@@ -4611,6 +4935,8 @@ PixelUI.CheckBox = CheckBox
 PixelUI.Slider = Slider
 PixelUI.RangeSlider = RangeSlider
 PixelUI.ProgressBar = ProgressBar
+PixelUI.ProgressRing = ProgressRing
+PixelUI.CircularProgressBar = CircularProgressBar
 PixelUI.ListView = ListView
 PixelUI.Container = Container
 PixelUI.ToggleSwitch = ToggleSwitch
