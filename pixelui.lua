@@ -2861,10 +2861,11 @@ function ColorPickerDialog:new(props)
     dialog.modal = nil
     dialog.colorPicker = nil
     dialog.previewColor = dialog.selectedColor
+    dialog.border = props.border ~= false  -- Border enabled by default, can be disabled
     
     -- Dialog dimensions - wider to accommodate more columns, shorter height
     dialog.width = 36
-    dialog.height = 14
+    dialog.height = 16  -- Increased height to accommodate better spacing
     
     return dialog
 end
@@ -2879,7 +2880,7 @@ function ColorPickerDialog:show()
         width = self.width,
         height = self.height,
         background = colors.lightGray,
-        border = true,
+        border = self.border,  -- Use the border property
         onClose = function()
             self:hide()
         end
@@ -2914,7 +2915,7 @@ function ColorPickerDialog:show()
     
     -- Create preview area
     local previewLabel = Label:new({
-        x = 2, y = 8,  -- Moved up due to reduced height
+        x = 2, y = 10,  -- Moved further down to avoid overlap with color grid
         text = "Preview:",
         color = colors.black,
         background = colors.lightGray,  -- Explicitly set background
@@ -2923,7 +2924,7 @@ function ColorPickerDialog:show()
     
     -- Create a larger preview swatch
     local previewSwatch = Label:new({
-        x = 11, y = 8,
+        x = 11, y = 10,  -- Moved down to match preview label
         text = "      ",  -- 6 spaces for preview color
         color = colors.white,
         background = self.previewColor,
@@ -2941,8 +2942,8 @@ function ColorPickerDialog:show()
     }
     
     local nameLabel = Label:new({
-        x = 2, y = 10,  -- Moved up due to reduced height
-        text = colorNames[self.previewColor] or "Unknown",
+        x = 2, y = 12,  -- Moved down to provide more space
+        text = ("Current: " .. (colorNames[self.previewColor] or "Unknown")),
         color = colors.black,
         background = colors.lightGray,  -- Explicitly set background
         width = self.width - 2
@@ -2950,7 +2951,7 @@ function ColorPickerDialog:show()
     
     -- Create buttons
     local okButton = Button:new({
-        x = 2, y = 12,  -- Moved up due to reduced height
+        x = 2, y = 14,  -- Moved down to accommodate new spacing
         text = "OK",
         width = 6,
         height = 1,
@@ -2966,7 +2967,7 @@ function ColorPickerDialog:show()
     })
     
     local cancelButton = Button:new({
-        x = 10, y = 12,  -- Moved up due to reduced height
+        x = 10, y = 14,  -- Moved down to accommodate new spacing
         text = "Cancel",
         width = 8,
         height = 1,
@@ -2981,7 +2982,7 @@ function ColorPickerDialog:show()
     })
     
     local resetButton = Button:new({
-        x = 20, y = 12,  -- Moved up due to reduced height
+        x = 20, y = 14,  -- Moved down to accommodate new spacing
         text = "Reset",
         width = 8,
         height = 1,
