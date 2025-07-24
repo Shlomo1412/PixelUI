@@ -2176,6 +2176,7 @@ function Chart:new(props)
     local chart = Widget.new(self, props)
     chart.data = props.data or {}
     chart.chartType = props.chartType or "line" -- "line", "bar", "scatter"
+    chart.renderMode = props.renderMode or "lines" -- "lines", "pixels"
     chart.title = props.title or ""
     chart.xLabel = props.xLabel or ""
     chart.yLabel = props.yLabel or ""
@@ -2289,8 +2290,12 @@ function Chart:render()
     
     if self.yLabel ~= "" then
         term.setTextColor(self.labelColor)
-        term.setCursorPos(absX, absY + math.floor(self.height / 2))
-        term.write(self.yLabel)
+        -- Render y-label vertically
+        local labelY = absY + math.floor((self.height - #self.yLabel) / 2)
+        for i = 1, #self.yLabel do
+            term.setCursorPos(absX, labelY + i - 1)
+            term.write(self.yLabel:sub(i, i))
+        end
     end
     
     term.setBackgroundColor(colors.black)
@@ -2331,28 +2336,46 @@ end
 function Chart:drawLineChart(chartX, chartY, chartWidth, chartHeight, minX, maxX, minY, maxY)
     term.setTextColor(self.dataColor)
     
-    local lastScreenX, lastScreenY = nil, nil
-    
-    for i, point in ipairs(self.data) do
-        local x, y = point.x or point[1] or 0, point.y or point[2] or 0
-        
-        -- Convert to screen coordinates
-        local screenX = chartX + math.floor((x - minX) / (maxX - minX) * (chartWidth - 1))
-        local screenY = chartY + chartHeight - 1 - math.floor((y - minY) / (maxY - minY) * (chartHeight - 1))
-        
-        if screenX >= chartX and screenX < chartX + chartWidth and
-           screenY >= chartY and screenY < chartY + chartHeight then
+    if self.renderMode == "pixels" then
+        -- Pixels mode: draw only individual points
+        for i, point in ipairs(self.data) do
+            local x, y = point.x or point[1] or 0, point.y or point[2] or 0
             
-            -- Draw point
-            term.setCursorPos(screenX, screenY)
-            term.write("*")
+            -- Convert to screen coordinates
+            local screenX = chartX + math.floor((x - minX) / (maxX - minX) * (chartWidth - 1))
+            local screenY = chartY + chartHeight - 1 - math.floor((y - minY) / (maxY - minY) * (chartHeight - 1))
             
-            -- Draw line to previous point
-            if lastScreenX and lastScreenY then
-                self:drawLine(lastScreenX, lastScreenY, screenX, screenY)
+            if screenX >= chartX and screenX < chartX + chartWidth and
+               screenY >= chartY and screenY < chartY + chartHeight then
+                term.setCursorPos(screenX, screenY)
+                term.write("*")
             end
+        end
+    else
+        -- Lines mode: draw points connected with lines
+        local lastScreenX, lastScreenY = nil, nil
+        
+        for i, point in ipairs(self.data) do
+            local x, y = point.x or point[1] or 0, point.y or point[2] or 0
             
-            lastScreenX, lastScreenY = screenX, screenY
+            -- Convert to screen coordinates
+            local screenX = chartX + math.floor((x - minX) / (maxX - minX) * (chartWidth - 1))
+            local screenY = chartY + chartHeight - 1 - math.floor((y - minY) / (maxY - minY) * (chartHeight - 1))
+            
+            if screenX >= chartX and screenX < chartX + chartWidth and
+               screenY >= chartY and screenY < chartY + chartHeight then
+                
+                -- Draw point
+                term.setCursorPos(screenX, screenY)
+                term.write("*")
+                
+                -- Draw line to previous point
+                if lastScreenX and lastScreenY then
+                    self:drawLine(lastScreenX, lastScreenY, screenX, screenY)
+                end
+                
+                lastScreenX, lastScreenY = screenX, screenY
+            end
         end
     end
 end

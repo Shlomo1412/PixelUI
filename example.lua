@@ -86,6 +86,7 @@ local demo = {
         colorPickerVisible = false,
         -- Chart state
         chartType = "line",
+        chartRenderMode = "lines",
         chartData = {
             {x = 1, y = 10}, {x = 2, y = 25}, {x = 3, y = 15}, {x = 4, y = 30}, 
             {x = 5, y = 20}, {x = 6, y = 35}, {x = 7, y = 28}, {x = 8, y = 40}
@@ -1185,7 +1186,7 @@ end
 function demo:createChartDemo()
     PixelUI.label({
         x = 2, y = 6,
-        text = "Chart Widget (" .. self.state.chartType .. " chart):",
+        text = "Chart Widget (" .. self.state.chartType .. " chart, " .. self.state.chartRenderMode .. " mode):",
         color = colors.white
     })
     
@@ -1195,6 +1196,7 @@ function demo:createChartDemo()
         height = 10,
         data = self.state.chartData,
         chartType = self.state.chartType,
+        renderMode = self.state.chartRenderMode,
         title = "Sample Data",
         xLabel = "Time",
         yLabel = "Value",
@@ -1248,9 +1250,44 @@ function demo:createChartDemo()
         end
     })
     
+    -- Render mode buttons (only for line charts)
+    if self.state.chartType == "line" then
+        PixelUI.label({
+            x = 40, y = 13,
+            text = "Render Mode:",
+            color = colors.lightGray
+        })
+        
+        PixelUI.button({
+            x = 40, y = 14,
+            text = "Lines",
+            background = self.state.chartRenderMode == "lines" and colors.green or colors.gray,
+            color = colors.white,
+            width = 6,
+            height = 1,
+            onClick = function()
+                self.state.chartRenderMode = "lines"
+                self:refreshFrame()
+            end
+        })
+        
+        PixelUI.button({
+            x = 47, y = 14,
+            text = "Pixels",
+            background = self.state.chartRenderMode == "pixels" and colors.green or colors.gray,
+            color = colors.white,
+            width = 6,
+            height = 1,
+            onClick = function()
+                self.state.chartRenderMode = "pixels"
+                self:refreshFrame()
+            end
+        })
+    end
+    
     -- Data manipulation buttons
     PixelUI.button({
-        x = 40, y = 14,
+        x = 40, y = self.state.chartType == "line" and 16 or 14,
         text = "New Data",
         background = colors.orange,
         color = colors.white,
@@ -1266,7 +1303,7 @@ function demo:createChartDemo()
     })
     
     PixelUI.button({
-        x = 40, y = 15,
+        x = 40, y = self.state.chartType == "line" and 17 or 15,
         text = "Add Point",
         background = colors.blue,
         color = colors.white,
@@ -1280,7 +1317,7 @@ function demo:createChartDemo()
     })
     
     PixelUI.button({
-        x = 40, y = 16,
+        x = 40, y = self.state.chartType == "line" and 18 or 16,
         text = "Clear",
         background = colors.red,
         color = colors.white,
