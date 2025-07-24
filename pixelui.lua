@@ -11,6 +11,7 @@ local eventQueue = {}
 local running = false
 local isDragging = false
 local draggedWidget = nil
+local focusedWidget = nil  -- Track globally focused widget
 
 -- Advanced Animation System
 local AnimationManager = {
@@ -185,6 +186,31 @@ local function isPointInBounds(x, y, widget)
            y >= widget.y and y < widget.y + widget.height
 end
 
+-- Focus management functions
+local function setFocusedWidget(widget)
+    if focusedWidget and focusedWidget ~= widget and focusedWidget.focused then
+        focusedWidget.focused = false
+        if focusedWidget.onFocusLost then
+            focusedWidget:onFocusLost()
+        end
+    end
+    focusedWidget = widget
+    if widget then
+        widget.focused = true
+        if widget.onFocusGained then
+            widget:onFocusGained()
+        end
+    end
+end
+
+local function clearFocus()
+    setFocusedWidget(nil)
+end
+
+local function getFocusedWidget()
+    return focusedWidget
+end
+
 -- Border utilities for character-based borders (similar to Basalt)
 local colorHex = {}
 for i = 0, 15 do
@@ -330,6 +356,12 @@ function Widget:handleClick(x, y)
 
     -- Check if click is within this widget
     if isPointInBounds(relX, relY, {x = 1, y = 1, width = self.width, height = self.height}) then
+        -- If this widget is not the currently focused widget and it's not focusable,
+        -- clear focus from other widgets
+        if not self.focused and not (self.handleKey or self.handleChar) then
+            clearFocus()
+        end
+        
         if self.onClick then
             self:onClick(relX, relY)
         end
@@ -700,7 +732,7 @@ function TextBox:handleChar(char)
 end
 
 function TextBox:onClick(relX, relY)
-    self.focused = true
+    setFocusedWidget(self)
     -- Set cursor position based on click
     local pos = relX
     if self.border then pos = pos - 1 end
@@ -3741,12 +3773,19 @@ function PixelUI.handleEvent(event, ...)
         end)
 
         -- Handle click events for all widgets (reverse order for proper z-index)
+        local clickHandled = false
         traverse(widgets, function(widget)
             if widget.visible ~= false and widget.handleClick and widget:handleClick(x, y) then
+                clickHandled = true
                 return true
             end
             return false
         end)
+        
+        -- If no widget handled the click, clear focus
+        if not clickHandled then
+            clearFocus()
+        end
         
     elseif event == "mouse_scroll" then
         local direction, x, y = args[1], args[2], args[3]
@@ -3813,7 +3852,7 @@ function PixelUI.handleEvent(event, ...)
             return false
         end
         traverse(widgets, function(widget)
-            if widget.focused and widget.handleKey then
+            if widget == focusedWidget and widget.handleKey then
                 if widget:handleKey(key) then
                     return true
                 end
@@ -3833,7 +3872,7 @@ function PixelUI.handleEvent(event, ...)
             return false
         end
         traverse(widgets, function(widget)
-            if widget.focused and widget.handleChar then
+            if widget == focusedWidget and widget.handleChar then
                 if widget:handleChar(char) then
                     return true
                 end
@@ -3853,6 +3892,19 @@ end
 
 function PixelUI.getWidgets()
     return widgets
+end
+
+-- Focus management API
+function PixelUI.setFocus(widget)
+    setFocusedWidget(widget)
+end
+
+function PixelUI.clearFocus()
+    clearFocus()
+end
+
+function PixelUI.getFocusedWidget()
+    return getFocusedWidget()
 end
 
 -- Export all widget classes for advanced usage
