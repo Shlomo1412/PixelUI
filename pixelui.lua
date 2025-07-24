@@ -2445,6 +2445,15 @@ function Modal:render()
         self.content:draw()
     end
     
+    -- Draw children (for ColorPickerDialog compatibility)
+    for _, child in ipairs(self.children or {}) do
+        if child.draw then
+            child:draw()
+        elseif child.render then
+            child:render()
+        end
+    end
+    
     term.setBackgroundColor(colors.black)
 end
 
@@ -2835,6 +2844,217 @@ function ColorPicker:handleMouseMove(x, y)
         end
     else
         self.hoveredIndex = nil
+    end
+end
+
+-- ColorPickerDialog Widget (Modal Color Picker)
+local ColorPickerDialog = setmetatable({}, {__index = Widget})
+ColorPickerDialog.__index = ColorPickerDialog
+
+function ColorPickerDialog:new(props)
+    local dialog = Widget.new(self, props)
+    dialog.title = props.title or "Select Color"
+    dialog.selectedColor = props.selectedColor or colors.white
+    dialog.onColorSelected = props.onColorSelected
+    dialog.onCancel = props.onCancel
+    dialog.visible = false
+    dialog.modal = nil
+    dialog.colorPicker = nil
+    dialog.previewColor = dialog.selectedColor
+    
+    -- Dialog dimensions - wider to accommodate more columns, shorter height
+    dialog.width = 36
+    dialog.height = 14
+    
+    return dialog
+end
+
+function ColorPickerDialog:show()
+    self.visible = true
+    self.previewColor = self.selectedColor
+    
+    -- Create modal background
+    local termWidth, termHeight = term.getSize()
+    self.modal = Modal:new({
+        width = self.width,
+        height = self.height,
+        background = colors.lightGray,
+        border = true,
+        onClose = function()
+            self:hide()
+        end
+    })
+    
+    -- Create title label
+    local titleLabel = Label:new({
+        x = 2, y = 2,
+        text = self.title,
+        color = colors.black,
+        background = colors.lightGray,  -- Explicitly set background
+        align = "center",
+        width = self.width - 2
+    })
+    
+    -- Create color picker
+    self.colorPicker = ColorPicker:new({
+        x = 2, y = 4,
+        selectedColor = self.selectedColor,
+        gridColumns = 8,  -- More columns to spread horizontally
+        colorSize = 2,
+        showPreview = false,
+        showName = false,
+        onChange = function(colorpicker, color, index, name)
+            self.previewColor = color
+            -- Update preview swatch color
+            if self.previewSwatch then
+                self.previewSwatch.background = color
+            end
+        end
+    })
+    
+    -- Create preview area
+    local previewLabel = Label:new({
+        x = 2, y = 8,  -- Moved up due to reduced height
+        text = "Preview:",
+        color = colors.black,
+        background = colors.lightGray,  -- Explicitly set background
+        width = 8
+    })
+    
+    -- Create a larger preview swatch
+    local previewSwatch = Label:new({
+        x = 11, y = 8,
+        text = "      ",  -- 6 spaces for preview color
+        color = colors.white,
+        background = self.previewColor,
+        width = 6
+    })
+    
+    -- Create color name display
+    local colorNames = {
+        [colors.white] = "White", [colors.orange] = "Orange", [colors.magenta] = "Magenta",
+        [colors.lightBlue] = "Light Blue", [colors.yellow] = "Yellow", [colors.lime] = "Lime",
+        [colors.pink] = "Pink", [colors.gray] = "Gray", [colors.lightGray] = "Light Gray",
+        [colors.cyan] = "Cyan", [colors.purple] = "Purple", [colors.blue] = "Blue",
+        [colors.brown] = "Brown", [colors.green] = "Green", [colors.red] = "Red",
+        [colors.black] = "Black"
+    }
+    
+    local nameLabel = Label:new({
+        x = 2, y = 10,  -- Moved up due to reduced height
+        text = colorNames[self.previewColor] or "Unknown",
+        color = colors.black,
+        background = colors.lightGray,  -- Explicitly set background
+        width = self.width - 2
+    })
+    
+    -- Create buttons
+    local okButton = Button:new({
+        x = 2, y = 12,  -- Moved up due to reduced height
+        text = "OK",
+        width = 6,
+        height = 1,
+        background = colors.green,
+        color = colors.white,
+        onClick = function()
+            self.selectedColor = self.previewColor
+            if self.onColorSelected then
+                self.onColorSelected(self.selectedColor)
+            end
+            self:hide()
+        end
+    })
+    
+    local cancelButton = Button:new({
+        x = 10, y = 12,  -- Moved up due to reduced height
+        text = "Cancel",
+        width = 8,
+        height = 1,
+        background = colors.red,
+        color = colors.white,
+        onClick = function()
+            if self.onCancel then
+                self.onCancel()
+            end
+            self:hide()
+        end
+    })
+    
+    local resetButton = Button:new({
+        x = 20, y = 12,  -- Moved up due to reduced height
+        text = "Reset",
+        width = 8,
+        height = 1,
+        background = colors.orange,
+        color = colors.white,
+        onClick = function()
+            self.previewColor = colors.white
+            self.colorPicker.selectedColor = colors.white
+            self.colorPicker.selectedIndex = 1
+            nameLabel.text = "White"
+            -- Update preview swatch
+            if previewSwatch then
+                previewSwatch.background = colors.white
+            end
+        end
+    })
+    
+    -- Add all widgets to modal
+    self.modal:addChild(titleLabel)
+    self.modal:addChild(self.colorPicker)
+    self.modal:addChild(previewLabel)
+    self.modal:addChild(previewSwatch)
+    self.modal:addChild(nameLabel)
+    self.modal:addChild(okButton)
+    self.modal:addChild(cancelButton)
+    self.modal:addChild(resetButton)
+    
+    -- Add modal to widgets list
+    table.insert(widgets, self.modal)
+    
+    -- Store references for updates
+    self.nameLabel = nameLabel
+    self.previewSwatch = previewSwatch
+end
+
+function ColorPickerDialog:hide()
+    self.visible = false
+    if self.modal then
+        -- Remove modal from widgets list
+        for i, widget in ipairs(widgets) do
+            if widget == self.modal then
+                table.remove(widgets, i)
+                break
+            end
+        end
+        self.modal = nil
+    end
+end
+
+function ColorPickerDialog:render()
+    if not self.visible or not self.modal then return end
+    
+    -- Update preview area and color name
+    if self.nameLabel then
+        local colorNames = {
+            [colors.white] = "White", [colors.orange] = "Orange", [colors.magenta] = "Magenta",
+            [colors.lightBlue] = "Light Blue", [colors.yellow] = "Yellow", [colors.lime] = "Lime",
+            [colors.pink] = "Pink", [colors.gray] = "Gray", [colors.lightGray] = "Light Gray",
+            [colors.cyan] = "Cyan", [colors.purple] = "Purple", [colors.blue] = "Blue",
+            [colors.brown] = "Brown", [colors.green] = "Green", [colors.red] = "Red",
+            [colors.black] = "Black"
+        }
+        self.nameLabel.text = colorNames[self.previewColor] or "Unknown"
+    end
+    
+    -- Update preview swatch color
+    if self.previewSwatch then
+        self.previewSwatch.background = self.previewColor
+    end
+    
+    -- Draw preview color swatch (legacy method, now handled by previewSwatch widget)
+    if self.modal then
+        term.setBackgroundColor(colors.black)
     end
 end
 
@@ -3653,6 +3873,11 @@ function PixelUI.colorPicker(props)
     return colorpicker
 end
 
+function PixelUI.colorPickerDialog(props)
+    local dialog = ColorPickerDialog:new(props)
+    return dialog
+end
+
 function PixelUI.loadingIndicator(props)
     local loading = LoadingIndicator:new(props)
     table.insert(widgets, loading)
@@ -3935,6 +4160,7 @@ PixelUI.Breadcrumb = Breadcrumb
 PixelUI.TreeView = TreeView
 PixelUI.MsgBox = MsgBox
 PixelUI.ColorPicker = ColorPicker
+PixelUI.ColorPickerDialog = ColorPickerDialog
 PixelUI.LoadingIndicator = LoadingIndicator
 PixelUI.Spinner = Spinner
 

@@ -1350,9 +1350,35 @@ function demo:createColorPickerDemo()
         color = colors.lightGray
     })
     
+    -- Create ColorPickerDialog button
+    PixelUI.button({
+        x = 2, y = 17,
+        text = "Open Color Dialog",
+        background = colors.blue,
+        color = colors.white,
+        width = 18,
+        height = 1,
+        onClick = function()
+            if not demo.state.colorPickerDialog then
+                demo.state.colorPickerDialog = PixelUI.colorPickerDialog({
+                    title = "Choose Your Color",
+                    selectedColor = demo.state.selectedColor,
+                    onColorSelected = function(color)
+                        demo.state.selectedColor = color
+                        demo:refreshFrame()
+                    end,
+                    onCancel = function()
+                        -- Color selection was cancelled
+                    end
+                })
+            end
+            demo.state.colorPickerDialog:show()
+        end
+    })
+    
     -- Reset button
     PixelUI.button({
-        x = 25, y = 17,
+        x = 22, y = 17,
         text = "Reset to White",
         background = colors.purple,
         color = colors.white,
@@ -1366,7 +1392,7 @@ function demo:createColorPickerDemo()
     
     -- Random color button
     PixelUI.button({
-        x = 42, y = 17,
+        x = 39, y = 17,
         text = "Random",
         background = colors.orange,
         color = colors.white,

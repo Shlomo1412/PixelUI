@@ -8,7 +8,7 @@ A modern, feature-rich, extensible UI framework for ComputerCraft and CC: Tweake
 
 ## 🚀 Super Features
 
-- **Comprehensive Widget Library**: Buttons, labels, text boxes, checkboxes, sliders, progress bars, list views, containers, group boxes, color pickers, tab controls, combo boxes, numeric up/down, spinners, loading indicators, scrollbars, modal dialogs, draggable widgets, and more.
+- **Comprehensive Widget Library**: Buttons, labels, text boxes, checkboxes, sliders, progress bars, list views, containers, group boxes, color pickers, color picker dialogs, tab controls, combo boxes, numeric up/down, spinners, loading indicators, scrollbars, modal dialogs, draggable widgets, and more.
 - **Advanced Layouts**: Absolute, vertical, horizontal, and smart margin/grid layouts for complex UIs.
 - **Scrollable Containers**: True scrollable containers with automatic scrollbars, strict clipping, and event handling.
 - **Event System**: Mouse, keyboard, scroll, drag, and focus events, with full propagation and focus management.
@@ -97,6 +97,14 @@ PixelUI.msgBox({
   buttons = {"OK", "Cancel"},
   onButton = function(box, idx, text) print("You chose " .. text) end
 })
+
+-- Color picker dialog
+local colorDialog = PixelUI.colorPickerDialog({
+  title = "Choose Color",
+  selectedColor = colors.blue,
+  onColorSelected = function(color) print("Selected:", color) end
+})
+colorDialog:show()
 ```
 
 ### 8. **Draggable Widgets**
@@ -430,15 +438,59 @@ PixelUI.msgBox({ title = "Hello!", message = "This is a modal dialog.", buttons 
 ### `PixelUI.colorPicker(props)` — **Color Picker**
 **Properties:**
 - `x`, `y`
-- `color`: Initial color
+- `selectedColor`: Initial color
+- `gridColumns`: Number of columns in color grid (default: 4)
+- `colorSize`: Size of each color swatch (default: 2)
+- `showPreview`: Show color preview area (default: true)
+- `showName`: Show color name (default: true)
 
 **Events:**
-- `onChange(self, color)`
+- `onChange(self, color, index, name)`
 
 **Example:**
 ```lua
-PixelUI.colorPicker({ x = 2, y = 34, color = colors.red, onChange = function(self, c) print(c) end })
+PixelUI.colorPicker({ x = 2, y = 34, selectedColor = colors.red, onChange = function(self, color, index, name) print(name) end })
 ```
+
+---
+
+### `PixelUI.colorPickerDialog(props)` — **Modal Color Picker Dialog**
+**Properties:**
+- `title`: Dialog title (default: "Select Color")
+- `selectedColor`: Initial color selection
+- `onColorSelected`: Callback when color is selected
+- `onCancel`: Callback when dialog is cancelled
+
+**Events:**
+- `onColorSelected(color)`: Called when OK is clicked with selected color
+- `onCancel()`: Called when Cancel is clicked or dialog is closed
+
+**Methods:**
+- `show()`: Display the modal dialog
+- `hide()`: Close the dialog
+
+**Example:**
+```lua
+local dialog = PixelUI.colorPickerDialog({
+    title = "Choose Your Color",
+    selectedColor = colors.blue,
+    onColorSelected = function(color)
+        print("Selected color:", color)
+        -- Apply the color to your widget/application
+    end,
+    onCancel = function()
+        print("Color selection cancelled")
+    end
+})
+dialog:show()
+```
+
+**Notes:**
+- Uses an 8-column grid layout for better horizontal space utilization
+- Includes color preview swatch and color name display
+- Features OK, Cancel, and Reset buttons
+- Modal dialog blocks interaction with other UI elements
+- Automatically centers on screen
 
 ---
 
