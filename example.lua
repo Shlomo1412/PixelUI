@@ -1105,16 +1105,23 @@ end
 function demo:createListViewDemo()
     PixelUI.label({
         x = 2, y = 6,
-        text = "List View:",
+        text = "Scrollable List View (use mouse wheel):",
         color = colors.white
     })
     
+    -- Create a ListView with many items to demonstrate scrolling
+    local longItemList = {}
+    for i = 1, 25 do
+        table.insert(longItemList, "List Item " .. i .. " - Scrollable content")
+    end
+    
     PixelUI.listView({
         x = 2, y = 8,
-        width = 20,
-        height = 6,
-        items = self.state.listItems,
-        selectedIndex = self.state.selectedItem,
+        width = 35,
+        height = 6,  -- Shows only 6 items at once
+        items = longItemList,
+        selectedIndex = self.state.selectedItem or 1,
+        scrollable = true,
         onSelect = function(self, item, index)
             demo.state.selectedItem = index
             demo:refreshFrame()
@@ -1122,21 +1129,39 @@ function demo:createListViewDemo()
     })
     
     PixelUI.label({
-        x = 25, y = 8,
+        x = 40, y = 8,
         text = "Selected:",
         color = colors.white
     })
     
     PixelUI.label({
-        x = 25, y = 9,
-        text = self.state.listItems[self.state.selectedItem] or "None",
+        x = 40, y = 9,
+        text = longItemList[self.state.selectedItem or 1] or "None",
         color = colors.yellow
     })
     
     PixelUI.label({
-        x = 25, y = 10,
-        text = "Index: " .. self.state.selectedItem,
+        x = 40, y = 10,
+        text = "Index: " .. (self.state.selectedItem or 1),
         color = colors.cyan
+    })
+    
+    PixelUI.label({
+        x = 40, y = 12,
+        text = "Total items: " .. #longItemList,
+        color = colors.orange
+    })
+    
+    PixelUI.label({
+        x = 40, y = 13,
+        text = "Visible: 6 items",
+        color = colors.orange
+    })
+    
+    PixelUI.label({
+        x = 40, y = 15,
+        text = "Scroll to see all items!",
+        color = colors.lime
     })
 end
 
@@ -2802,21 +2827,60 @@ function demo:createScrollableDemo()
         isScrollable = true
     })
 
-    -- Add lots of labels as true children of the container
+    -- Add lots of components as true children of the container
     for i = 1, 20 do
+        -- Use the PixelUI factory method to ensure proper integration
         local label = PixelUI.Label:new({
-            x = 2, y = i, -- relative to container content area
+            x = 2, y = i * 2, -- relative to container content area, spaced out
             width = 26,
-            text = "Item " .. i,
+            text = "Scrollable Item " .. i .. " - This is content that extends beyond viewport",
             color = (i % 2 == 0) and colors.yellow or colors.cyan
         })
         container:addChild(label)
+        
+        -- Add buttons every few items to test interaction
+        if i % 3 == 0 then
+            local button = PixelUI.Button:new({
+                x = 2, y = i * 2 + 1,
+                width = 15,
+                text = "Button " .. i,
+                onClick = function()
+                    print("Clicked button " .. i .. " in scrollable container!")
+                end
+            })
+            container:addChild(button)
+        end
     end
     
+    -- Add instructions
     PixelUI.label({
         x = 35, y = 8,
-        text = "Scroll to see more!",
+        text = "Use mouse wheel to scroll!",
         color = colors.lime
+    })
+    
+    PixelUI.label({
+        x = 35, y = 10,
+        text = "Content: 20 items",
+        color = colors.orange
+    })
+    
+    PixelUI.label({
+        x = 35, y = 11,
+        text = "Visible: ~4 items",
+        color = colors.orange
+    })
+    
+    PixelUI.label({
+        x = 35, y = 13,
+        text = "Try clicking buttons",
+        color = colors.lightBlue
+    })
+    
+    PixelUI.label({
+        x = 35, y = 14,
+        text = "while scrolled!",
+        color = colors.lightBlue
     })
 end
 

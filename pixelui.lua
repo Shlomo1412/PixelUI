@@ -1684,6 +1684,45 @@ function ListView:onClick(relX, relY)
     end
 end
 
+function ListView:handleScroll(x, y, direction)
+    if not self.enabled or not self.visible or not self.scrollable then return false end
+    
+    local absX, absY = self:getAbsolutePos()
+    local relX, relY = x - absX + 1, y - absY + 1
+    
+    -- Check if scroll is within ListView bounds
+    if isPointInBounds(relX, relY, {x = 1, y = 1, width = self.width, height = self.height}) then
+        if #self.items > self.height then
+            local scrollAmount = direction * 1 -- Scroll 1 item at a time for precision
+            local maxScroll = math.max(0, #self.items - self.height)
+            self.scrollOffset = math.max(0, math.min(maxScroll, self.scrollOffset + scrollAmount)) -- Flip direction for natural scrolling
+            
+            -- Ensure selected item stays visible
+            self:ensureSelectedVisible()
+            return true
+        end
+    end
+    
+    return false
+end
+
+function ListView:ensureSelectedVisible()
+    if self.selectedIndex <= self.scrollOffset then
+        -- Selected item is above visible area
+        self.scrollOffset = math.max(0, self.selectedIndex - 1)
+    elseif self.selectedIndex > self.scrollOffset + self.height then
+        -- Selected item is below visible area
+        self.scrollOffset = self.selectedIndex - self.height
+    end
+end
+
+function ListView:setSelectedIndex(index)
+    if index >= 1 and index <= #self.items then
+        self.selectedIndex = index
+        self:ensureSelectedVisible()
+    end
+end
+
 -- Container Widget
 local Container = setmetatable({}, {__index = Widget})
 Container.__index = Container
@@ -1755,10 +1794,19 @@ function Container:updateScrollBars()
     end
     if needsHorizontalScroll then
         viewHeight = viewHeight - 1
+        -- Re-check vertical scroll need after horizontal scrollbar takes space
+        needsVerticalScroll = self.contentHeight > viewHeight
+        if needsVerticalScroll and not needsHorizontalScroll then
+            viewWidth = viewWidth - 1 -- Account for vertical scrollbar
+        end
     end
     
-    -- Only create scrollbars if ScrollBar class is available (defined later in file)
-    if not ScrollBar then return end
+    -- Only create scrollbars if ScrollBar class is available
+    -- (ScrollBar is defined later in the file, so we need to check if it exists)
+    if not ScrollBar then
+        -- ScrollBar not yet defined, skip scrollbar creation for now
+        return
+    end
     
     -- Create vertical scrollbar if needed
     if needsVerticalScroll and not self.verticalScrollBar then
@@ -1769,8 +1817,10 @@ function Container:updateScrollBars()
             height = viewHeight,
             orientation = "vertical",
             min = 0,
-            max = self.contentHeight - viewHeight,
+            max = math.max(0, self.contentHeight - viewHeight),
+            value = self.scrollY or 0,
             pageSize = viewHeight,
+            step = 1,
             onChange = function(value)
                 self.scrollY = value
             end
@@ -1779,6 +1829,11 @@ function Container:updateScrollBars()
     elseif not needsVerticalScroll and self.verticalScrollBar then
         self.verticalScrollBar = nil
         self.scrollY = 0
+    elseif self.verticalScrollBar then
+        -- Update existing scrollbar properties
+        self.verticalScrollBar.max = math.max(0, self.contentHeight - viewHeight)
+        self.verticalScrollBar.pageSize = viewHeight
+        self.verticalScrollBar.value = math.min(self.verticalScrollBar.value, self.verticalScrollBar.max)
     end
     
     -- Create horizontal scrollbar if needed
@@ -1790,8 +1845,10 @@ function Container:updateScrollBars()
             height = 1,
             orientation = "horizontal",
             min = 0,
-            max = self.contentWidth - viewWidth,
+            max = math.max(0, self.contentWidth - viewWidth),
+            value = self.scrollX or 0,
             pageSize = viewWidth,
+            step = 1,
             onChange = function(value)
                 self.scrollX = value
             end
@@ -1800,6 +1857,11 @@ function Container:updateScrollBars()
     elseif not needsHorizontalScroll and self.horizontalScrollBar then
         self.horizontalScrollBar = nil
         self.scrollX = 0
+    elseif self.horizontalScrollBar then
+        -- Update existing scrollbar properties
+        self.horizontalScrollBar.max = math.max(0, self.contentWidth - viewWidth)
+        self.horizontalScrollBar.pageSize = viewWidth
+        self.horizontalScrollBar.value = math.min(self.horizontalScrollBar.value, self.horizontalScrollBar.max)
     end
 end
 
@@ -1816,124 +1878,79 @@ function Container:calculateContentBounds()
             self.contentHeight = math.max(self.contentHeight, bottomEdge)
         end
     end
+    
+    -- Ensure minimum content size to match viewport
+    local viewWidth = self.width - (self.border and 2 or 0)
+    local viewHeight = self.height - (self.border and 2 or 0)
+    self.contentWidth = math.max(self.contentWidth, viewWidth)
+    self.contentHeight = math.max(self.contentHeight, viewHeight)
 end
 
 function Container:draw()
     if not self.visible then return end
     self:render()
-    -- Set up clipping region for scrollable content
-    local contentX = (self.border and 1 or 0) + 1
-    local contentY = (self.border and 1 or 0) + 1
+    
+    -- Calculate content and viewport dimensions
+    local contentX = self.x + (self.border and 1 or 0)
+    local contentY = self.y + (self.border and 1 or 0)
     local contentWidth = self.width - (self.border and 2 or 0) - (self.verticalScrollBar and 1 or 0)
     local contentHeight = self.height - (self.border and 2 or 0) - (self.horizontalScrollBar and 1 or 0)
-    -- Draw children with scroll offset and strict clipping
+    
+    -- Draw children with scroll offset and clipping
     for _, child in ipairs(self.children) do
         if child.visible ~= false then
-            -- Apply scroll offset (vertical only for now)
+            -- Store original position
             local originalX, originalY = child.x, child.y
+            
+            -- Apply scroll offset
             child.x = child.x - (self.scrollX or 0)
             child.y = child.y - (self.scrollY or 0)
-            -- Compute child's area relative to content area
-            local childLeft = child.x
-            local childTop = child.y
-            local childRight = child.x + (child.width or 1) - 1
-            local childBottom = child.y + (child.height or 1) - 1
-            local clipLeft = contentX
-            local clipTop = contentY
-            local clipRight = contentX + contentWidth - 1
-            local clipBottom = contentY + contentHeight - 1
-            -- Only draw if child is fully or partially inside the viewport
-            if childRight >= clipLeft and childLeft <= clipRight and childBottom >= clipTop and childTop <= clipBottom then
+            
+            -- Check if child is within viewport bounds
+            local childLeft = contentX + child.x - 1
+            local childTop = contentY + child.y - 1
+            local childRight = childLeft + child.width - 1
+            local childBottom = childTop + child.height - 1
+            
+            local viewportLeft = contentX
+            local viewportTop = contentY
+            local viewportRight = contentX + contentWidth - 1
+            local viewportBottom = contentY + contentHeight - 1
+            
+            -- Only draw if child overlaps with viewport
+            if childRight >= viewportLeft and childLeft <= viewportRight and 
+               childBottom >= viewportTop and childTop <= viewportBottom then
                 child:draw()
             end
+            
             -- Restore original position
             child.x, child.y = originalX, originalY
         end
     end
-    -- Draw scrollbars
+    
+    -- Draw scrollbars last
     if self.verticalScrollBar then self.verticalScrollBar:draw() end
     if self.horizontalScrollBar then self.horizontalScrollBar:draw() end
 end
 
 function Container:handleScroll(x, y, direction)
     if not self.enabled or not self.visible or not self.isScrollable then return false end
+    
     local absX, absY = self:getAbsolutePos()
     local relX, relY = x - absX + 1, y - absY + 1
+    
+    -- Check if scroll is within container bounds
     if isPointInBounds(relX, relY, {x = 1, y = 1, width = self.width, height = self.height}) then
-        if self.verticalScrollBar then
-            self.verticalScrollBar:scroll(direction * 3)
+        local scrollAmount = direction * 3 -- Scroll 3 lines at a time
+        
+        if self.verticalScrollBar and self.verticalScrollBar.scroll then
+            -- Use scrollbar if available
+            self.verticalScrollBar:scroll(-scrollAmount) -- Flip direction for natural scrolling
             return true
         else
-            -- Fallback: update scrollY directly if no scrollbar
-            self.scrollY = math.max(0, math.min((self.contentHeight or 0) - (self.height - (self.border and 2 or 0)), self.scrollY - direction * 3))
-            return true
-        end
-    end
-    return false
-end
-function Container:handleClick(x, y)
-    if not self.enabled or not self.visible then return false end
-    
-    local absX, absY = self:getAbsolutePos()
-    local relX, relY = x - absX + 1, y - absY + 1
-    
-    -- Check scrollbars first
-    if self.verticalScrollBar and self.verticalScrollBar:handleClick(x, y) then
-        return true
-    end
-    if self.horizontalScrollBar and self.horizontalScrollBar:handleClick(x, y) then
-        return true
-    end
-    
-    -- Check children with scroll offset and strict bounds
-    for i = #self.children, 1, -1 do
-        local child = self.children[i]
-        if child.visible ~= false then
-            -- Apply scroll offset for hit testing
-            local absX, absY = self:getAbsolutePos()
-            local relChildX = child.x - (self.scrollX or 0)
-            local relChildY = child.y - (self.scrollY or 0)
-            local childLeft = absX + relChildX - 1
-            local childTop = absY + relChildY - 1
-            local childRight = childLeft + (child.width or 1) - 1
-            local childBottom = childTop + (child.height or 1) - 1
-            local clipLeft = absX + (self.border and 1 or 0)
-            local clipTop = absY + (self.border and 1 or 0)
-            local clipRight = clipLeft + (self.width - (self.border and 2 or 0) - (self.verticalScrollBar and 1 or 0)) - 1
-            local clipBottom = clipTop + (self.height - (self.border and 2 or 0) - (self.horizontalScrollBar and 1 or 0)) - 1
-
-            -- Only allow click if child is at least partially inside the viewport
-            if childRight >= clipLeft and childLeft <= clipRight and childBottom >= clipTop and childTop <= clipBottom then
-                -- Adjust event coordinates for child
-                local adjustedX = x + (self.scrollX or 0)
-                local adjustedY = y + (self.scrollY or 0)
-                if child:handleClick(adjustedX, adjustedY) then
-                    return true
-                end
-            end
-        end
-    end
-    
-    -- Check if click is within this container
-    if isPointInBounds(relX, relY, {x = 1, y = 1, width = self.width, height = self.height}) then
-        if self.onClick then
-            self:onClick(relX, relY)
-        end
-        return true
-    end
-    
-    return false
-end
-
-function Container:handleScroll(x, y, direction)
-    if not self.enabled or not self.visible or not self.isScrollable then return false end
-    
-    local absX, absY = self:getAbsolutePos()
-    local relX, relY = x - absX + 1, y - absY + 1
-    
-    if isPointInBounds(relX, relY, {x = 1, y = 1, width = self.width, height = self.height}) then
-        if self.verticalScrollBar then
-            self.verticalScrollBar:scroll(direction * 3) -- Scroll 3 lines at a time
+            -- Direct scroll handling when no scrollbar is available
+            local maxScrollY = math.max(0, self.contentHeight - (self.height - (self.border and 2 or 0)))
+            self.scrollY = math.max(0, math.min(maxScrollY, (self.scrollY or 0) + scrollAmount)) -- Flip direction
             return true
         end
     end
@@ -2923,40 +2940,54 @@ function ScrollBar:render()
     local absX, absY = self:getAbsolutePos()
     local theme = currentTheme
     
+    -- Get theme colors with fallbacks
+    local trackColor = (theme.scrollbar and theme.scrollbar.track) or colors.gray
+    local thumbColor = (theme.scrollbar and theme.scrollbar.thumb) or colors.lightGray
+    
     if self.orientation == "vertical" then
         -- Draw track
-        term.setBackgroundColor(theme.scrollbar.track)
+        term.setBackgroundColor(trackColor)
         for i = 0, self.height - 1 do
             term.setCursorPos(absX, absY + i)
             term.write(" ")
         end
         
-        -- Calculate thumb position
+        -- Calculate thumb position and size
         local trackSize = self.height
-        local thumbPos = math.floor((self.value - self.min) / (self.max - self.min) * (trackSize - self.thumbSize))
-        thumbPos = math.max(0, math.min(trackSize - self.thumbSize, thumbPos))
-        
-        -- Draw thumb
-        term.setBackgroundColor(theme.scrollbar.thumb)
-        for i = 0, self.thumbSize - 1 do
-            term.setCursorPos(absX, absY + thumbPos + i)
-            term.write(" ")
+        local range = self.max - self.min
+        if range > 0 then
+            local thumbSize = math.max(1, math.floor((self.pageSize / (range + self.pageSize)) * trackSize))
+            local thumbPos = math.floor(((self.value - self.min) / range) * (trackSize - thumbSize))
+            thumbPos = math.max(0, math.min(trackSize - thumbSize, thumbPos))
+            
+            -- Draw thumb
+            term.setBackgroundColor(thumbColor)
+            for i = 0, thumbSize - 1 do
+                if thumbPos + i < trackSize then
+                    term.setCursorPos(absX, absY + thumbPos + i)
+                    term.write(" ")
+                end
+            end
         end
     else
         -- Horizontal scrollbar
-        term.setBackgroundColor(theme.scrollbar.track)
+        term.setBackgroundColor(trackColor)
         term.setCursorPos(absX, absY)
         term.write(string.rep(" ", self.width))
         
-        -- Calculate thumb position
+        -- Calculate thumb position and size
         local trackSize = self.width
-        local thumbPos = math.floor((self.value - self.min) / (self.max - self.min) * (trackSize - self.thumbSize))
-        thumbPos = math.max(0, math.min(trackSize - self.thumbSize, thumbPos))
-        
-        -- Draw thumb
-        term.setBackgroundColor(theme.scrollbar.thumb)
-        term.setCursorPos(absX + thumbPos, absY)
-        term.write(string.rep(" ", self.thumbSize))
+        local range = self.max - self.min
+        if range > 0 then
+            local thumbSize = math.max(1, math.floor((self.pageSize / (range + self.pageSize)) * trackSize))
+            local thumbPos = math.floor(((self.value - self.min) / range) * (trackSize - thumbSize))
+            thumbPos = math.max(0, math.min(trackSize - thumbSize, thumbPos))
+            
+            -- Draw thumb
+            term.setBackgroundColor(thumbColor)
+            term.setCursorPos(absX + thumbPos, absY)
+            term.write(string.rep(" ", thumbSize))
+        end
     end
     
     term.setBackgroundColor(colors.black)
@@ -2967,23 +2998,32 @@ function ScrollBar:onClick(relX, relY)
     
     local trackSize = self.orientation == "vertical" and self.height or self.width
     local clickPos = self.orientation == "vertical" and relY or relX
+    local range = self.max - self.min
     
-    -- Calculate thumb position
-    local thumbPos = math.floor((self.value - self.min) / (self.max - self.min) * (trackSize - self.thumbSize))
+    if range <= 0 then return end
     
-    if clickPos >= thumbPos + 1 and clickPos <= thumbPos + self.thumbSize then
+    -- Calculate current thumb position and size
+    local thumbSize = math.max(1, math.floor((self.pageSize / (range + self.pageSize)) * trackSize))
+    local thumbPos = math.floor(((self.value - self.min) / range) * (trackSize - thumbSize))
+    thumbPos = math.max(0, math.min(trackSize - thumbSize, thumbPos))
+    
+    if clickPos >= thumbPos + 1 and clickPos <= thumbPos + thumbSize then
         -- Start dragging thumb
         self.isDragging = true
         self.dragOffset = clickPos - thumbPos - 1
         isDragging = true
         draggedWidget = self
     else
-        -- Jump to position
-        local newThumbPos = clickPos - math.floor(self.thumbSize / 2)
-        local newValue = self.min + (newThumbPos / (trackSize - self.thumbSize)) * (self.max - self.min)
-        self.value = math.max(self.min, math.min(self.max, newValue))
-        if self.onChange then
-            self:onChange(self.value)
+        -- Jump to position (page up/down behavior)
+        local newThumbPos = clickPos - math.floor(thumbSize / 2)
+        newThumbPos = math.max(0, math.min(trackSize - thumbSize, newThumbPos))
+        
+        if trackSize > thumbSize then
+            local newValue = self.min + (newThumbPos / (trackSize - thumbSize)) * range
+            self.value = math.max(self.min, math.min(self.max, newValue))
+            if self.onChange then
+                self:onChange(self.value)
+            end
         end
     end
 end
@@ -2994,12 +3034,20 @@ function ScrollBar:handleDrag(x, y)
     local absX, absY = self:getAbsolutePos()
     local relPos = (self.orientation == "vertical" and (y - absY + 1) or (x - absX + 1)) - self.dragOffset
     local trackSize = self.orientation == "vertical" and self.height or self.width
+    local range = self.max - self.min
     
-    local newValue = self.min + (relPos / (trackSize - self.thumbSize)) * (self.max - self.min)
-    self.value = math.max(self.min, math.min(self.max, newValue))
+    if range <= 0 then return end
     
-    if self.onChange then
-        self:onChange(self.value)
+    -- Calculate thumb size
+    local thumbSize = math.max(1, math.floor((self.pageSize / (range + self.pageSize)) * trackSize))
+    
+    if trackSize > thumbSize then
+        local newValue = self.min + (relPos / (trackSize - thumbSize)) * range
+        self.value = math.max(self.min, math.min(self.max, newValue))
+        
+        if self.onChange then
+            self:onChange(self.value)
+        end
     end
 end
 
