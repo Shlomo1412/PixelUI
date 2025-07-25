@@ -8,7 +8,7 @@ A modern, feature-rich, extensible UI framework for ComputerCraft and CC: Tweake
 
 ## 🚀 Super Features
 
-- **Comprehensive Widget Library**: Buttons, labels, text boxes, checkboxes, sliders, range sliders, progress bars, list views, containers, group boxes, color pickers, color picker dialogs, tab controls, combo boxes, numeric up/down, spinners, loading indicators, scrollbars, modal dialogs, charts, draggable widgets, and more.
+- **Comprehensive Widget Library**: Buttons, labels, text boxes, checkboxes, sliders, range sliders, progress bars, list views, containers, group boxes, color pickers, color picker dialogs, tab controls, combo boxes, numeric up/down, spinners, loading indicators, scrollbars, modal dialogs, charts, draggable widgets, notification toasts, data grids/tables, and more.
 - **Advanced Layouts**: Absolute, vertical, horizontal, and smart margin/grid layouts for complex UIs.
 - **Scrollable Containers**: True scrollable containers with automatic scrollbars, strict clipping, and event handling.
 - **Event System**: Mouse, keyboard, scroll, drag, and focus events, with full propagation and focus management.
@@ -683,6 +683,91 @@ PixelUI.treeView({ x = 2, y = 44, width = 20, height = 8, tree = { {text="Root",
 **Example:**
 ```lua
 PixelUI.spacer({ width = 2, height = 1 })
+```
+
+---
+
+### `PixelUI.notificationToast(props)` — **Toast Notifications**
+**Properties:**
+- `message`: Main notification text
+- `title`: Optional title text (default: "")
+- `type`: Notification type - `"info"`, `"success"`, `"warning"`, `"error"` (default: "info")
+- `duration`: Auto-hide duration in milliseconds (default: 3000)
+- `x`, `y`, `width`, `height`: Position and size
+- `closeable`: Show close button (default: true)
+- `autoHide`: Auto-hide after duration (default: true)
+- `background`, `color`, `titleColor`: Custom colors
+
+**Events:**
+- `onShow()`: Called when toast is shown
+- `onHide()`: Called when toast is hidden
+- `onClick(relX, relY)`: Called when toast is clicked
+
+**Methods:**
+- `show()`: Display the toast notification
+- `hide()`: Hide the toast notification
+
+**Example:**
+```lua
+local toast = PixelUI.notificationToast({
+    message = "Operation completed successfully!",
+    title = "Success",
+    type = "success",
+    duration = 4000
+})
+toast:show()
+
+-- Or use the convenience function
+PixelUI.showToast("Hello World!", "Info", "info", 3000)
+```
+
+---
+
+### `PixelUI.dataGrid(props)` — **Data Table/Grid**
+**Properties:**
+- `x`, `y`, `width`, `height`: Position and size
+- `columns`: Array of column definitions with `field`, `title`, `width`
+- `data`: Array of data rows (objects or arrays)
+- `showHeaders`: Show column headers (default: true)
+- `alternatingRows`: Alternate row colors (default: true)
+- `gridLines`: Show grid lines (default: true)
+- `sortable`: Enable column sorting (default: true)
+- `selectable`: Enable row selection (default: true)
+- `multiSelect`: Allow multiple row selection (default: false)
+- `headerColor`, `headerBackground`: Header styling
+- `selectedColor`, `selectedBackground`: Selected row styling
+- `alternateBackground`: Alternate row color
+- `gridLineColor`: Grid line color
+
+**Events:**
+- `onRowSelect(rowIndex, rowData)`: Called when row is selected
+- `onRowDoubleClick(rowIndex, rowData)`: Called on row double-click
+- `onSort(columnIndex, direction)`: Called when column is sorted
+- `onCellClick(rowIndex, columnIndex, cellData)`: Called on cell click
+
+**Methods:**
+- `sortData()`: Sort data by current sort column
+- `selectRow(index)`: Select a specific row
+- `deselectRow(index)`: Deselect a specific row
+- `isRowSelected(index)`: Check if row is selected
+
+**Example:**
+```lua
+PixelUI.dataGrid({
+    x = 2, y = 8, width = 45, height = 12,
+    columns = {
+        {field = "id", title = "ID", width = 4},
+        {field = "name", title = "Name", width = 14},
+        {field = "department", title = "Dept", width = 12}
+    },
+    data = {
+        {id = 1, name = "Alice", department = "Engineering"},
+        {id = 2, name = "Bob", department = "Marketing"}
+    },
+    onRowSelect = function(rowIndex, rowData)
+        print("Selected:", rowData.name)
+    end
+})
 ```
 
 ---

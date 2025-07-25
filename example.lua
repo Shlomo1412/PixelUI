@@ -10,7 +10,7 @@ PixelUI.init()
 -- Demo state and configuration
 local demo = {
     currentFrame = 1,
-    totalFrames = 27,  -- Increased to include ProgressRing, CircularProgressBar, and TreeView demos
+    totalFrames = 29,  -- Increased to include NotificationToast and DataGrid demos
     frames = {
         {name = "Label", component = "label", 
          description = "Static text display widget with alignment and color options"},
@@ -65,7 +65,11 @@ local demo = {
         {name = "ScrollBar", component = "scrollBar",
          description = "Standalone ScrollBar widget: vertical and horizontal styles, interactive!"},
         {name = "Scrollable", component = "scrollable",
-         description = "Scrollable container: try scrolling the content with mouse wheel!"}
+         description = "Scrollable container: try scrolling the content with mouse wheel!"},
+        {name = "NotificationToast", component = "notificationToast",
+         description = "Toast notifications: info, success, warning, error types with animations!"},
+        {name = "DataGrid", component = "dataGrid",
+         description = "Data table/grid: sortable columns, selectable rows, scrollable content!"}
     },
     -- Component-specific state
     state = {
@@ -111,6 +115,24 @@ local demo = {
         -- ScrollBar state
         scrollBarValue = 30,
         scrollBarHValue = 60,
+        -- NotificationToast state
+        toastType = "info",
+        toastCount = 0,
+        activeToasts = {},
+        -- DataGrid state
+        gridData = {
+            {id = 1, name = "Alice Johnson", age = 28, department = "Engineering", salary = 75000},
+            {id = 2, name = "Bob Smith", age = 34, department = "Marketing", salary = 65000},
+            {id = 3, name = "Charlie Brown", age = 29, department = "Engineering", salary = 78000},
+            {id = 4, name = "Diana Prince", age = 31, department = "HR", salary = 70000},
+            {id = 5, name = "Eve Davis", age = 26, department = "Design", salary = 68000},
+            {id = 6, name = "Frank Miller", age = 38, department = "Engineering", salary = 85000},
+            {id = 7, name = "Grace Hopper", age = 42, department = "Engineering", salary = 95000},
+            {id = 8, name = "Henry Ford", age = 45, department = "Operations", salary = 80000},
+            {id = 9, name = "Ivy Lee", age = 27, department = "Marketing", salary = 62000},
+            {id = 10, name = "Jack Wilson", age = 33, department = "Finance", salary = 72000}
+        },
+        gridSelectedRow = nil,
         -- TreeView state
         treeData = {
             {
@@ -311,6 +333,10 @@ function demo:createComponentDemo(component)
         self:createScrollBarDemo()
     elseif component == "scrollable" then
         self:createScrollableDemo()
+    elseif component == "notificationToast" then
+        self:createNotificationToastDemo()
+    elseif component == "dataGrid" then
+        self:createDataGridDemo()
     end
 end
 
@@ -2880,6 +2906,258 @@ function demo:createScrollableDemo()
     PixelUI.label({
         x = 35, y = 14,
         text = "while scrolled!",
+        color = colors.lightBlue
+    })
+end
+
+-- NotificationToast demonstration
+function demo:createNotificationToastDemo()
+    PixelUI.label({
+        x = 2, y = 6,
+        text = "Notification Toast System:",
+        color = colors.white
+    })
+    
+    PixelUI.label({
+        x = 2, y = 8,
+        text = "Click buttons to show different types of toast notifications:",
+        color = colors.lightGray
+    })
+    
+    -- Info toast
+    PixelUI.button({
+        x = 2, y = 10,
+        text = "Info Toast",
+        background = colors.blue,
+        color = colors.white,
+        width = 12,
+        height = 1,
+        onClick = function()
+            self.state.toastCount = self.state.toastCount + 1
+            PixelUI.showToast("This is an info notification #" .. self.state.toastCount, "Information", "info", 3000)
+        end
+    })
+    
+    -- Success toast
+    PixelUI.button({
+        x = 15, y = 10,
+        text = "Success Toast",
+        background = colors.green,
+        color = colors.white,
+        width = 14,
+        height = 1,
+        onClick = function()
+            self.state.toastCount = self.state.toastCount + 1
+            PixelUI.showToast("Operation completed successfully!", "Success", "success", 4000)
+        end
+    })
+    
+    -- Warning toast
+    PixelUI.button({
+        x = 2, y = 12,
+        text = "Warning Toast",
+        background = colors.orange,
+        color = colors.white,
+        width = 14,
+        height = 1,
+        onClick = function()
+            self.state.toastCount = self.state.toastCount + 1
+            PixelUI.showToast("This is a warning message", "Warning", "warning", 5000)
+        end
+    })
+    
+    -- Error toast
+    PixelUI.button({
+        x = 17, y = 12,
+        text = "Error Toast",
+        background = colors.red,
+        color = colors.white,
+        width = 12,
+        height = 1,
+        onClick = function()
+            self.state.toastCount = self.state.toastCount + 1
+            PixelUI.showToast("An error occurred!", "Error", "error", 6000)
+        end
+    })
+    
+    -- Custom position toast
+    PixelUI.button({
+        x = 31, y = 12,
+        text = "Custom Toast",
+        background = colors.purple,
+        color = colors.white,
+        width = 13,
+        height = 1,
+        onClick = function()
+            local toast = PixelUI.notificationToast({
+                message = "Custom positioned toast!",
+                title = "Custom",
+                type = "info",
+                x = 10,
+                y = 5,
+                width = 25,
+                duration = 3000
+            })
+            toast:show()
+        end
+    })
+    
+    -- Information labels
+    PixelUI.label({
+        x = 2, y = 14,
+        text = "Toast Features:",
+        color = colors.white
+    })
+    
+    PixelUI.label({
+        x = 2, y = 15,
+        text = "- Auto-positioning (top-right by default)",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 16,
+        text = "- 4 types: info, success, warning, error",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 17,
+        text = "- Slide-in animation with fade effects",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 18,
+        text = "- Auto-hide after specified duration",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 35, y = 10,
+        text = "Toasts shown: " .. self.state.toastCount,
+        color = colors.yellow
+    })
+end
+
+-- DataGrid demonstration
+function demo:createDataGridDemo()
+    PixelUI.label({
+        x = 2, y = 6,
+        text = "Data Grid/Table (Employee Database):",
+        color = colors.white
+    })
+    
+    PixelUI.dataGrid({
+        x = 2, y = 8,
+        width = 45,
+        height = 12,
+        columns = {
+            {field = "id", title = "ID", width = 4},
+            {field = "name", title = "Name", width = 14},
+            {field = "age", title = "Age", width = 5},
+            {field = "department", title = "Dept", width = 12},
+            {field = "salary", title = "Salary", width = 8}
+        },
+        data = self.state.gridData,
+        showHeaders = true,
+        alternatingRows = true,
+        gridLines = true,
+        sortable = true,
+        selectable = true,
+        headerColor = colors.white,
+        headerBackground = colors.blue,
+        selectedBackground = colors.lightBlue,
+        alternateBackground = colors.gray,
+        onRowSelect = function(rowIndex, rowData)
+            demo.state.gridSelectedRow = rowIndex
+            demo:refreshFrame()
+        end,
+        onSort = function(columnIndex, direction)
+            -- Handle sort event if needed
+        end
+    })
+    
+    -- Selection info
+    PixelUI.label({
+        x = 50, y = 8,
+        text = "Selected:",
+        color = colors.white
+    })
+    
+    if self.state.gridSelectedRow then
+        local selectedData = self.state.gridData[self.state.gridSelectedRow]
+        PixelUI.label({
+            x = 50, y = 9,
+            text = "Row: " .. self.state.gridSelectedRow,
+            color = colors.yellow
+        })
+        
+        PixelUI.label({
+            x = 50, y = 10,
+            text = "Name: " .. selectedData.name,
+            color = colors.lime
+        })
+        
+        PixelUI.label({
+            x = 50, y = 11,
+            text = "Dept: " .. selectedData.department,
+            color = colors.cyan
+        })
+        
+        PixelUI.label({
+            x = 50, y = 12,
+            text = "Salary: $" .. selectedData.salary,
+            color = colors.orange
+        })
+    else
+        PixelUI.label({
+            x = 50, y = 9,
+            text = "None",
+            color = colors.gray
+        })
+    end
+    
+    -- Features list
+    PixelUI.label({
+        x = 50, y = 14,
+        text = "Features:",
+        color = colors.white
+    })
+    
+    PixelUI.label({
+        x = 50, y = 15,
+        text = "- Sortable columns",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 50, y = 16,
+        text = "- Row selection",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 50, y = 17,
+        text = "- Alternating rows",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 50, y = 18,
+        text = "- Scrollable content",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 50, y = 19,
+        text = "- Grid lines",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 20,
+        text = "Instructions: Click column headers to sort, click rows to select",
         color = colors.lightBlue
     })
 end

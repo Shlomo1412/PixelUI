@@ -67,6 +67,36 @@ function AnimationManager:update(dt)
     end
 end
 
+-- Timer system for delayed callbacks
+local TimerManager = {
+    timers = {}
+}
+
+function TimerManager:add(callback, delay)
+    table.insert(self.timers, {
+        callback = callback,
+        startTime = os.clock(),
+        delay = delay / 1000 -- Convert ms to seconds
+    })
+end
+
+function TimerManager:update()
+    local now = os.clock()
+    local toRemove = {}
+    
+    for i, timer in ipairs(self.timers) do
+        if now - timer.startTime >= timer.delay then
+            timer.callback()
+            table.insert(toRemove, i)
+        end
+    end
+    
+    -- Remove completed timers
+    for i = #toRemove, 1, -1 do
+        table.remove(self.timers, toRemove[i])
+    end
+end
+
 function PixelUI.animate(widget, params)
     -- params: { to = {x=,y=,...}, duration=, delay=, easing=, onUpdate=, onComplete= }
     local from = {}
@@ -85,6 +115,11 @@ function PixelUI.animate(widget, params)
     })
 end
 
+-- Timer system
+function PixelUI.setTimeout(callback, delay)
+    TimerManager:add(callback, delay)
+end
+
 -- Internal: call AnimationManager:update(dt) every frame
 local lastFrameTime = os.epoch and os.epoch("utc") or os.clock() * 1000
 local function animationFrame()
@@ -92,6 +127,7 @@ local function animationFrame()
     local dt = (now - lastFrameTime) / 1000
     lastFrameTime = now
     AnimationManager:update(dt)
+    TimerManager:update()
 end
 
 -- Theming System
@@ -4242,6 +4278,580 @@ function Spinner:stop()
     self.active = false
 end
 
+-- NotificationToast Widget
+local NotificationToast = setmetatable({}, {__index = Widget})
+NotificationToast.__index = NotificationToast
+
+function NotificationToast:new(props)
+    local toast = Widget.new(self, props)
+    toast.message = props.message or "Notification"
+    toast.title = props.title or ""
+    toast.type = props.type or "info" -- "info", "success", "warning", "error"
+    toast.duration = props.duration or 3000 -- Duration in milliseconds
+    toast.background = props.background or toast:getTypeColor()
+    toast.color = props.color or colors.white
+    toast.titleColor = props.titleColor or colors.white
+    toast.closeable = props.closeable ~= false
+    toast.autoHide = props.autoHide ~= false
+    toast.onShow = props.onShow
+    toast.onHide = props.onHide
+    toast.onClick = props.onClick
+    toast.fadeSpeed = props.fadeSpeed or 20
+    toast.slideSpeed = props.slideSpeed or 10
+    
+    -- Animation properties
+    toast.opacity = 0
+    toast.slideOffset = -toast.height
+    toast.isShowing = false
+    toast.isHiding = false
+    toast.showTime = 0
+    toast.lastUpdate = os.clock()
+    
+    -- Position at top-right by default
+    local termWidth, termHeight = term.getSize()
+    if not props.x then
+        toast.x = termWidth - toast.width + 1
+    end
+    if not props.y then
+        toast.y = 1
+    end
+    
+    -- Auto-size based on content
+    if not props.width then
+        local messageLength = #toast.message
+        local titleLength = toast.title ~= "" and #toast.title or 0
+        toast.width = math.max(math.min(math.max(messageLength, titleLength) + 4, 40), 20)
+    end
+    if not props.height then
+        toast.height = toast.title ~= "" and 3 or 2
+    end
+    
+    return toast
+end
+
+function NotificationToast:getTypeColor()
+    local typeColors = {
+        info = colors.blue,
+        success = colors.green,
+        warning = colors.orange,
+        error = colors.red
+    }
+    return typeColors[self.type] or colors.blue
+end
+
+function NotificationToast:render()
+    if not self.visible or self.opacity <= 0 then return end
+    
+    local absX, absY = self:getAbsolutePos()
+    
+    -- Apply slide animation
+    absY = absY + self.slideOffset
+    
+    -- Draw background with opacity simulation
+    local bgColor = self.background
+    if self.opacity < 1 then
+        -- Simulate opacity by blending with black
+        bgColor = colors.gray -- Simplified opacity effect
+    end
+    
+    term.setBackgroundColor(bgColor)
+    for i = 0, self.height - 1 do
+        term.setCursorPos(absX, absY + i)
+        term.write(string.rep(" ", self.width))
+    end
+    
+    -- Draw type indicator (left border)
+    local typeChar = self:getTypeIndicator()
+    term.setBackgroundColor(self:getTypeColor())
+    for i = 0, self.height - 1 do
+        term.setCursorPos(absX, absY + i)
+        term.write(" ")
+    end
+    
+    -- Draw title if present
+    local contentY = 0
+    if self.title ~= "" then
+        term.setBackgroundColor(bgColor)
+        term.setTextColor(self.titleColor)
+        term.setCursorPos(absX + 2, absY + contentY)
+        local titleText = self.title:sub(1, self.width - 4)
+        term.write(titleText)
+        contentY = contentY + 1
+    end
+    
+    -- Draw message
+    term.setBackgroundColor(bgColor)
+    term.setTextColor(self.color)
+    term.setCursorPos(absX + 2, absY + contentY)
+    local messageText = self.message:sub(1, self.width - 4)
+    term.write(messageText)
+    
+    -- Draw close button if closeable
+    if self.closeable then
+        term.setBackgroundColor(bgColor)
+        term.setTextColor(colors.lightGray)
+        term.setCursorPos(absX + self.width - 1, absY)
+        term.write("X")
+    end
+    
+    term.setBackgroundColor(colors.black)
+end
+
+function NotificationToast:getTypeIndicator()
+    local indicators = {
+        info = "i",
+        success = "+",
+        warning = "!",
+        error = "X"
+    }
+    return indicators[self.type] or "i"
+end
+
+function NotificationToast:show()
+    self.visible = true
+    self.isShowing = true
+    self.isHiding = false
+    self.showTime = os.clock()
+    self.lastUpdate = os.clock()
+    self.opacity = 0
+    self.slideOffset = -self.height
+    
+    if self.onShow then
+        self:onShow()
+    end
+    
+    -- Add to widgets if not already added
+    local found = false
+    for _, widget in ipairs(widgets) do
+        if widget == self then
+            found = true
+            break
+        end
+    end
+    if not found then
+        table.insert(widgets, self)
+    end
+end
+
+function NotificationToast:hide()
+    if not self.isHiding then
+        self.isHiding = true
+        self.isShowing = false
+        
+        if self.onHide then
+            self:onHide()
+        end
+    end
+end
+
+function NotificationToast:update()
+    if not self.visible then return end
+    
+    local now = os.clock()
+    local deltaTime = now - self.lastUpdate
+    self.lastUpdate = now
+    
+    if self.isShowing then
+        -- Animate in
+        self.opacity = math.min(1, self.opacity + deltaTime * self.fadeSpeed)
+        self.slideOffset = math.min(0, self.slideOffset + deltaTime * self.slideSpeed * self.height)
+        
+        if self.opacity >= 1 and self.slideOffset >= 0 then
+            self.isShowing = false
+            
+            -- Start auto-hide timer if enabled
+            if self.autoHide then
+                PixelUI.setTimeout(function()
+                    self:hide()
+                end, self.duration)
+            end
+        end
+    elseif self.isHiding then
+        -- Animate out
+        self.opacity = math.max(0, self.opacity - deltaTime * self.fadeSpeed)
+        self.slideOffset = math.max(-self.height, self.slideOffset - deltaTime * self.slideSpeed * self.height)
+        
+        if self.opacity <= 0 then
+            self.visible = false
+            self.isHiding = false
+            
+            -- Remove from widgets
+            for i, widget in ipairs(widgets) do
+                if widget == self then
+                    table.remove(widgets, i)
+                    break
+                end
+            end
+        end
+    end
+end
+
+function NotificationToast:onClick(relX, relY)
+    if self.closeable and relX == self.width and relY == 1 then
+        -- Close button clicked
+        self:hide()
+    elseif self.onClick then
+        self:onClick(relX, relY)
+    end
+end
+
+-- DataGrid Widget (Table)
+local DataGrid = setmetatable({}, {__index = Widget})
+DataGrid.__index = DataGrid
+
+function DataGrid:new(props)
+    local grid = Widget.new(self, props)
+    grid.columns = props.columns or {}
+    grid.data = props.data or {}
+    grid.headers = props.headers or {}
+    grid.showHeaders = props.showHeaders ~= false
+    grid.headerHeight = grid.showHeaders and 1 or 0
+    grid.rowHeight = props.rowHeight or 1
+    grid.alternatingRows = props.alternatingRows ~= false
+    grid.gridLines = props.gridLines ~= false
+    grid.sortable = props.sortable ~= false
+    grid.selectable = props.selectable ~= false
+    grid.multiSelect = props.multiSelect or false
+    grid.selectedRows = {}
+    grid.sortColumn = nil
+    grid.sortDirection = "asc" -- "asc" or "desc"
+    grid.scrollOffsetX = 0
+    grid.scrollOffsetY = 0
+    grid.cellPadding = props.cellPadding or 1
+    
+    -- Colors
+    grid.headerColor = props.headerColor or colors.lightGray
+    grid.headerBackground = props.headerBackground or colors.gray
+    grid.color = props.color or colors.white
+    grid.background = props.background or colors.black
+    grid.selectedColor = props.selectedColor or colors.black
+    grid.selectedBackground = props.selectedBackground or colors.lightBlue
+    grid.alternateBackground = props.alternateBackground or colors.gray
+    grid.gridLineColor = props.gridLineColor or colors.lightGray
+    
+    -- Events
+    grid.onRowSelect = props.onRowSelect
+    grid.onRowDoubleClick = props.onRowDoubleClick
+    grid.onSort = props.onSort
+    grid.onCellClick = props.onCellClick
+    
+    -- Calculate column widths if not specified
+    grid:calculateColumnWidths()
+    
+    return grid
+end
+
+function DataGrid:calculateColumnWidths()
+    if #self.columns == 0 then
+        -- Auto-generate columns from first data row
+        if #self.data > 0 then
+            local firstRow = self.data[1]
+            if type(firstRow) == "table" then
+                for key, value in pairs(firstRow) do
+                    table.insert(self.columns, {
+                        field = key,
+                        title = key:sub(1,1):upper() .. key:sub(2),
+                        width = math.max(#tostring(value), #key) + 2
+                    })
+                end
+            end
+        end
+    end
+    
+    -- Auto-calculate widths if not specified
+    for i, col in ipairs(self.columns) do
+        if not col.width then
+            local maxWidth = #(col.title or col.field or "")
+            
+            -- Check data for max width
+            for _, row in ipairs(self.data) do
+                local value = ""
+                if type(row) == "table" then
+                    value = tostring(row[col.field] or "")
+                else
+                    value = tostring(row[i] or "")
+                end
+                maxWidth = math.max(maxWidth, #value)
+            end
+            
+            col.width = math.min(maxWidth + self.cellPadding * 2, 20)
+        end
+    end
+end
+
+function DataGrid:render()
+    local absX, absY = self:getAbsolutePos()
+    
+    -- Draw headers
+    if self.showHeaders then
+        self:renderHeaders(absX, absY)
+    end
+    
+    -- Draw data rows
+    self:renderRows(absX, absY + self.headerHeight)
+    
+    -- Draw grid lines if enabled
+    if self.gridLines then
+        self:renderGridLines(absX, absY)
+    end
+    
+    term.setBackgroundColor(colors.black)
+end
+
+function DataGrid:renderHeaders(absX, absY)
+    local currentX = absX - self.scrollOffsetX
+    
+    term.setBackgroundColor(self.headerBackground)
+    term.setTextColor(self.headerColor)
+    
+    -- Clear header row
+    term.setCursorPos(absX, absY)
+    term.write(string.rep(" ", self.width))
+    
+    for i, col in ipairs(self.columns) do
+        if currentX + col.width > absX and currentX < absX + self.width then
+            term.setCursorPos(math.max(currentX, absX), absY)
+            
+            local title = col.title or col.field or ""
+            local displayWidth = math.min(col.width, absX + self.width - math.max(currentX, absX))
+            
+            -- Add sort indicator if this column is sorted
+            if self.sortColumn == i then
+                title = title .. (self.sortDirection == "asc" and "↑" or "↓")
+            end
+            
+            local text = title:sub(1, displayWidth - self.cellPadding)
+            text = text .. string.rep(" ", displayWidth - #text)
+            term.write(text:sub(1, displayWidth))
+        end
+        currentX = currentX + col.width
+    end
+end
+
+function DataGrid:renderRows(absX, absY)
+    local visibleRows = self.height - self.headerHeight
+    local startRow = self.scrollOffsetY + 1
+    
+    for row = 1, visibleRows do
+        local dataIndex = startRow + row - 1
+        if dataIndex <= #self.data then
+            local rowY = absY + row - 1
+            local isSelected = self:isRowSelected(dataIndex)
+            local isAlternate = self.alternatingRows and (dataIndex % 2 == 0)
+            
+            -- Determine row background
+            local rowBg = self.background
+            if isSelected then
+                rowBg = self.selectedBackground
+            elseif isAlternate then
+                rowBg = self.alternateBackground
+            end
+            
+            -- Clear row
+            term.setBackgroundColor(rowBg)
+            term.setCursorPos(absX, rowY)
+            term.write(string.rep(" ", self.width))
+            
+            -- Render cells
+            self:renderRowCells(absX, rowY, dataIndex, isSelected)
+        end
+    end
+end
+
+function DataGrid:renderRowCells(absX, rowY, dataIndex, isSelected)
+    local currentX = absX - self.scrollOffsetX
+    local rowData = self.data[dataIndex]
+    
+    local textColor = isSelected and self.selectedColor or self.color
+    term.setTextColor(textColor)
+    
+    for i, col in ipairs(self.columns) do
+        if currentX + col.width > absX and currentX < absX + self.width then
+            term.setCursorPos(math.max(currentX + self.cellPadding, absX), rowY)
+            
+            local value = ""
+            if type(rowData) == "table" then
+                value = tostring(rowData[col.field] or "")
+            else
+                value = tostring(rowData[i] or "")
+            end
+            
+            local displayWidth = math.min(col.width - self.cellPadding * 2, 
+                                        absX + self.width - math.max(currentX + self.cellPadding, absX))
+            
+            if displayWidth > 0 then
+                local text = value:sub(1, displayWidth)
+                term.write(text)
+            end
+        end
+        currentX = currentX + col.width
+    end
+end
+
+function DataGrid:renderGridLines(absX, absY)
+    term.setTextColor(self.gridLineColor)
+    
+    -- Vertical lines
+    local currentX = absX - self.scrollOffsetX
+    for i, col in ipairs(self.columns) do
+        currentX = currentX + col.width
+        if currentX >= absX and currentX < absX + self.width then
+            for y = 0, self.height - 1 do
+                term.setCursorPos(currentX, absY + y)
+                term.write("|")
+            end
+        end
+    end
+    
+    -- Horizontal lines
+    if self.showHeaders then
+        -- Header separator
+        term.setCursorPos(absX, absY + self.headerHeight)
+        term.write(string.rep("-", self.width))
+    end
+end
+
+function DataGrid:onClick(relX, relY)
+    if not self.enabled then return end
+    
+    if self.showHeaders and relY == 1 then
+        -- Header clicked - handle sorting
+        self:handleHeaderClick(relX)
+    elseif relY > self.headerHeight then
+        -- Data row clicked
+        self:handleRowClick(relX, relY)
+    end
+end
+
+function DataGrid:handleHeaderClick(relX)
+    if not self.sortable then return end
+    
+    local currentX = 1 - self.scrollOffsetX
+    for i, col in ipairs(self.columns) do
+        if relX >= currentX and relX < currentX + col.width then
+            -- Toggle sort direction if same column, otherwise set to ascending
+            if self.sortColumn == i then
+                self.sortDirection = self.sortDirection == "asc" and "desc" or "asc"
+            else
+                self.sortColumn = i
+                self.sortDirection = "asc"
+            end
+            
+            self:sortData()
+            break
+        end
+        currentX = currentX + col.width
+    end
+end
+
+function DataGrid:handleRowClick(relX, relY)
+    if not self.selectable then return end
+    
+    local rowIndex = self.scrollOffsetY + relY - self.headerHeight
+    if rowIndex >= 1 and rowIndex <= #self.data then
+        if self.multiSelect then
+            -- Toggle selection
+            if self:isRowSelected(rowIndex) then
+                self:deselectRow(rowIndex)
+            else
+                self:selectRow(rowIndex)
+            end
+        else
+            -- Single selection
+            self.selectedRows = {rowIndex}
+        end
+        
+        if self.onRowSelect then
+            self:onRowSelect(rowIndex, self.data[rowIndex])
+        end
+    end
+end
+
+function DataGrid:sortData()
+    if not self.sortColumn or not self.columns[self.sortColumn] then return end
+    
+    local field = self.columns[self.sortColumn].field
+    local direction = self.sortDirection
+    
+    table.sort(self.data, function(a, b)
+        local valueA, valueB
+        
+        if type(a) == "table" then
+            valueA = a[field] or ""
+        else
+            valueA = a[self.sortColumn] or ""
+        end
+        
+        if type(b) == "table" then
+            valueB = b[field] or ""
+        else
+            valueB = b[self.sortColumn] or ""
+        end
+        
+        -- Convert to strings for comparison
+        valueA = tostring(valueA):lower()
+        valueB = tostring(valueB):lower()
+        
+        if direction == "asc" then
+            return valueA < valueB
+        else
+            return valueA > valueB
+        end
+    end)
+    
+    -- Clear selection after sort
+    self.selectedRows = {}
+    
+    if self.onSort then
+        self:onSort(self.sortColumn, direction)
+    end
+end
+
+function DataGrid:isRowSelected(rowIndex)
+    for _, selectedIndex in ipairs(self.selectedRows) do
+        if selectedIndex == rowIndex then
+            return true
+        end
+    end
+    return false
+end
+
+function DataGrid:selectRow(rowIndex)
+    if not self:isRowSelected(rowIndex) then
+        table.insert(self.selectedRows, rowIndex)
+    end
+end
+
+function DataGrid:deselectRow(rowIndex)
+    for i, selectedIndex in ipairs(self.selectedRows) do
+        if selectedIndex == rowIndex then
+            table.remove(self.selectedRows, i)
+            break
+        end
+    end
+end
+
+function DataGrid:handleScroll(x, y, direction)
+    if not self.enabled or not self.visible then return false end
+    
+    local absX, absY = self:getAbsolutePos()
+    local relX, relY = x - absX + 1, y - absY + 1
+    
+    if isPointInBounds(relX, relY, {x = 1, y = 1, width = self.width, height = self.height}) then
+        local maxScrollY = math.max(0, #self.data - (self.height - self.headerHeight))
+        
+        if direction > 0 then
+            self.scrollOffsetY = math.max(0, self.scrollOffsetY - 1)
+        else
+            self.scrollOffsetY = math.min(maxScrollY, self.scrollOffsetY + 1)
+        end
+        
+        return true
+    end
+    
+    return false
+end
+
 -- MsgBox Widget (Message Box Dialog)
 local MsgBox = setmetatable({}, {__index = Widget})
 MsgBox.__index = MsgBox
@@ -4534,6 +5144,7 @@ function PixelUI.run(userConfig)
     if userConfig and userConfig.onStart then userConfig.onStart() end
     while running do
         animationFrame() -- update all animations
+        PixelUI.updateToasts() -- update toast notifications
         PixelUI.render()
         local event, p1, p2, p3, p4, p5 = os.pullEvent()
         if event == "timer" and p1 == timerId then
@@ -4552,9 +5163,13 @@ function PixelUI.run(userConfig)
                     running = false
                 end
             end
+            if userConfig and userConfig.onExit and userConfig.onExit() then
+                running = false
+            end
         end
     end
     if userConfig and userConfig.onQuit then userConfig.onQuit() end
+    term.setBackgroundColor(colors.black)
     term.clear()
     term.setCursorPos(1, 1)
 end
@@ -4850,6 +5465,43 @@ function PixelUI.spinner(props)
     return spinner
 end
 
+function PixelUI.notificationToast(props)
+    local toast = NotificationToast:new(props)
+    -- Don't add to container automatically - toasts manage their own positioning
+    return toast
+end
+
+function PixelUI.dataGrid(props)
+    local grid = DataGrid:new(props)
+    table.insert(widgets, grid)
+    if rootContainer then
+        rootContainer:addChild(grid)
+    end
+    return grid
+end
+
+-- Convenience function for showing toast notifications
+function PixelUI.showToast(message, title, type, duration)
+    local toast = PixelUI.notificationToast({
+        message = message,
+        title = title or "",
+        type = type or "info",
+        duration = duration or 3000
+    })
+    toast:show()
+    return toast
+end
+
+-- Update toasts (should be called in the main loop)
+function PixelUI.updateToasts()
+    for i = #widgets, 1, -1 do
+        local widget = widgets[i]
+        if widget.__index == NotificationToast then
+            widget:update()
+        end
+    end
+end
+
 -- Core rendering and event handling functions
 function PixelUI.render()
     -- Clear the screen first
@@ -5126,5 +5778,7 @@ PixelUI.ColorPicker = ColorPicker
 PixelUI.ColorPickerDialog = ColorPickerDialog
 PixelUI.LoadingIndicator = LoadingIndicator
 PixelUI.Spinner = Spinner
+PixelUI.NotificationToast = NotificationToast
+PixelUI.DataGrid = DataGrid
 
 return PixelUI
