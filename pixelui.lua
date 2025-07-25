@@ -1161,6 +1161,7 @@ function ProgressBar:new(props)
     progressbar.max = props.max or 100
     progressbar.color = props.color or colors.green
     progressbar.background = props.background or colors.gray
+    progressbar.backgroundPattern = props.backgroundPattern or "\127" -- Light shade character for incomplete part
     progressbar.intermediate = props.intermediate or false -- Enable intermediate/indeterminate mode
     progressbar.intermediateSpeed = props.intermediateSpeed or 2 -- Speed of intermediate animation
     progressbar.intermediateSize = props.intermediateSize or 3 -- Size of moving indicator
@@ -1181,10 +1182,11 @@ end
 function ProgressBar:render()
     local absX, absY = self:getAbsolutePos()
     
-    -- Draw background
+    -- Draw background with pattern
     term.setBackgroundColor(self.background)
+    term.setTextColor(colors.lightGray)
     term.setCursorPos(absX, absY)
-    term.write(string.rep(" ", self.width))
+    term.write(string.rep(self.backgroundPattern, self.width))
     
     if self.intermediate then
         -- Intermediate/indeterminate mode - moving indicator
