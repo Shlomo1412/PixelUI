@@ -4288,7 +4288,6 @@ function NotificationToast:new(props)
     toast.title = props.title or ""
     toast.type = props.type or "info" -- "info", "success", "warning", "error"
     toast.duration = props.duration or 3000 -- Duration in milliseconds
-    toast.background = props.background or toast:getTypeColor()
     toast.color = props.color or colors.white
     toast.titleColor = props.titleColor or colors.white
     toast.closeable = props.closeable ~= false
@@ -4298,25 +4297,19 @@ function NotificationToast:new(props)
     toast.onClick = props.onClick
     toast.fadeSpeed = props.fadeSpeed or 20
     toast.slideSpeed = props.slideSpeed or 10
+    toast.animateIn = props.animateIn ~= false  -- Enable slide-in animation
+    toast.animateOut = props.animateOut ~= false  -- Enable slide-out animation
+    toast.animationType = props.animationType or "slide"  -- "slide", "fade", "both"
     
     -- Animation properties
-    toast.opacity = 0
-    toast.slideOffset = -toast.height
+    toast.opacity = props.animateIn and (props.animationType == "fade" or props.animationType == "both") and 0 or 1
+    toast.slideOffset = props.animateIn and (props.animationType == "slide" or props.animationType == "both") and -(props.height or 3) or 0
     toast.isShowing = false
     toast.isHiding = false
     toast.showTime = 0
     toast.lastUpdate = os.clock()
     
-    -- Position at top-right by default
-    local termWidth, termHeight = term.getSize()
-    if not props.x then
-        toast.x = termWidth - toast.width + 1
-    end
-    if not props.y then
-        toast.y = 1
-    end
-    
-    -- Auto-size based on content
+    -- Auto-size based on content FIRST
     if not props.width then
         local messageLength = #toast.message
         local titleLength = toast.title ~= "" and #toast.title or 0
@@ -4325,6 +4318,23 @@ function NotificationToast:new(props)
     if not props.height then
         toast.height = toast.title ~= "" and 3 or 2
     end
+    
+    -- Update slide offset after height is determined
+    if props.animateIn and (props.animationType == "slide" or props.animationType == "both") then
+        toast.slideOffset = -toast.height
+    end
+    
+    -- Position at top-right by default AFTER sizing
+    local termWidth, termHeight = term.getSize()
+    if not props.x then
+        toast.x = termWidth - toast.width + 1
+    end
+    if not props.y then
+        toast.y = 1
+    end
+    
+    -- Set background color after getting type color
+    toast.background = props.background or toast:getTypeColor()
     
     return toast
 end
@@ -4350,8 +4360,16 @@ function NotificationToast:render()
     -- Draw background with opacity simulation
     local bgColor = self.background
     if self.opacity < 1 then
-        -- Simulate opacity by blending with black
-        bgColor = colors.gray -- Simplified opacity effect
+        -- Simulate opacity by blending with black background
+        local opacityColors = {
+            [colors.blue] = {colors.black, colors.blue, colors.lightBlue},
+            [colors.green] = {colors.black, colors.green, colors.lime},
+            [colors.orange] = {colors.black, colors.orange, colors.yellow},
+            [colors.red] = {colors.black, colors.red, colors.pink}
+        }
+        local colorSteps = opacityColors[bgColor] or {colors.black, bgColor, colors.white}
+        local stepIndex = math.floor(self.opacity * (#colorSteps - 1)) + 1
+        bgColor = colorSteps[math.min(stepIndex, #colorSteps)]
     end
     
     term.setBackgroundColor(bgColor)
@@ -4397,6 +4415,11 @@ function NotificationToast:render()
     term.setBackgroundColor(colors.black)
 end
 
+-- Alias draw to render for compatibility with the widget system
+function NotificationToast:draw()
+    self:render()
+end
+
 function NotificationToast:getTypeIndicator()
     local indicators = {
         info = "i",
@@ -4409,12 +4432,37 @@ end
 
 function NotificationToast:show()
     self.visible = true
-    self.isShowing = true
-    self.isHiding = false
     self.showTime = os.clock()
     self.lastUpdate = os.clock()
-    self.opacity = 0
-    self.slideOffset = -self.height
+    
+    -- Set initial animation state based on animation settings
+    if self.animateIn then
+        self.isShowing = true
+        self.isHiding = false
+        if self.animationType == "fade" then
+            self.opacity = 0
+            self.slideOffset = 0
+        elseif self.animationType == "slide" then
+            self.opacity = 1
+            self.slideOffset = -self.height
+        else -- "both"
+            self.opacity = 0
+            self.slideOffset = -self.height
+        end
+    else
+        -- No animation - show immediately
+        self.isShowing = false
+        self.isHiding = false
+        self.opacity = 1
+        self.slideOffset = 0
+        
+        -- Start auto-hide timer immediately if enabled
+        if self.autoHide then
+            PixelUI.setTimeout(function()
+                self:hide()
+            end, self.duration)
+        end
+    end
     
     if self.onShow then
         self:onShow()
@@ -4435,8 +4483,23 @@ end
 
 function NotificationToast:hide()
     if not self.isHiding then
-        self.isHiding = true
-        self.isShowing = false
+        if self.animateOut then
+            self.isHiding = true
+            self.isShowing = false
+        else
+            -- No animation - hide immediately
+            self.visible = false
+            self.isHiding = false
+            self.isShowing = false
+            
+            -- Remove from widgets immediately
+            for i, widget in ipairs(widgets) do
+                if widget == self then
+                    table.remove(widgets, i)
+                    break
+                end
+            end
+        end
         
         if self.onHide then
             self:onHide()
@@ -4452,30 +4515,57 @@ function NotificationToast:update()
     self.lastUpdate = now
     
     if self.isShowing then
-        -- Animate in
-        self.opacity = math.min(1, self.opacity + deltaTime * self.fadeSpeed)
-        self.slideOffset = math.min(0, self.slideOffset + deltaTime * self.slideSpeed * self.height)
-        
-        if self.opacity >= 1 and self.slideOffset >= 0 then
-            self.isShowing = false
-            
-            -- Start auto-hide timer if enabled
-            if self.autoHide then
-                PixelUI.setTimeout(function()
-                    self:hide()
-                end, self.duration)
+        -- Animate in based on animation type
+        if self.animationType == "fade" then
+            self.opacity = math.min(1, self.opacity + deltaTime * self.fadeSpeed)
+            if self.opacity >= 1 then
+                self.isShowing = false
+            end
+        elseif self.animationType == "slide" then
+            self.slideOffset = math.min(0, self.slideOffset + deltaTime * self.slideSpeed * self.height)
+            if self.slideOffset >= 0 then
+                self.isShowing = false
+            end
+        else -- "both"
+            self.opacity = math.min(1, self.opacity + deltaTime * self.fadeSpeed)
+            self.slideOffset = math.min(0, self.slideOffset + deltaTime * self.slideSpeed * self.height)
+            if self.opacity >= 1 and self.slideOffset >= 0 then
+                self.isShowing = false
             end
         end
-    elseif self.isHiding then
-        -- Animate out
-        self.opacity = math.max(0, self.opacity - deltaTime * self.fadeSpeed)
-        self.slideOffset = math.max(-self.height, self.slideOffset - deltaTime * self.slideSpeed * self.height)
         
-        if self.opacity <= 0 then
-            self.visible = false
-            self.isHiding = false
-            
-            -- Remove from widgets
+        -- Start auto-hide timer when animation finishes
+        if not self.isShowing and self.autoHide then
+            PixelUI.setTimeout(function()
+                self:hide()
+            end, self.duration)
+        end
+        
+    elseif self.isHiding then
+        -- Animate out based on animation type
+        if self.animationType == "fade" then
+            self.opacity = math.max(0, self.opacity - deltaTime * self.fadeSpeed)
+            if self.opacity <= 0 then
+                self.visible = false
+                self.isHiding = false
+            end
+        elseif self.animationType == "slide" then
+            self.slideOffset = math.max(-self.height, self.slideOffset - deltaTime * self.slideSpeed * self.height)
+            if self.slideOffset <= -self.height then
+                self.visible = false
+                self.isHiding = false
+            end
+        else -- "both"
+            self.opacity = math.max(0, self.opacity - deltaTime * self.fadeSpeed)
+            self.slideOffset = math.max(-self.height, self.slideOffset - deltaTime * self.slideSpeed * self.height)
+            if self.opacity <= 0 then
+                self.visible = false
+                self.isHiding = false
+            end
+        end
+        
+        -- Remove from widgets when animation completes
+        if not self.visible then
             for i, widget in ipairs(widgets) do
                 if widget == self then
                     table.remove(widgets, i)
@@ -5532,12 +5622,19 @@ function PixelUI.render()
         if rootContainer then
             rootContainer:draw()
         else
-            -- Render all widgets directly if no container
+            -- Render all widgets directly if no container (except toasts)
             for _, widget in ipairs(widgets) do
-                if widget.visible ~= false then
+                if widget.visible ~= false and widget.__index ~= NotificationToast then
                     widget:draw()
                 end
             end
+        end
+    end
+    
+    -- Always render toasts last (on top of everything, including modals)
+    for _, widget in ipairs(widgets) do
+        if widget.__index == NotificationToast and widget.visible ~= false then
+            widget:draw()
         end
     end
 end
