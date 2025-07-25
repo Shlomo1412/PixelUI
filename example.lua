@@ -10,7 +10,7 @@ PixelUI.init()
 -- Demo state and configuration
 local demo = {
     currentFrame = 1,
-    totalFrames = 29,  -- Increased to include NotificationToast and DataGrid demos
+    totalFrames = 31,  -- Updated to include Window and FilePicker demos
     frames = {
         {name = "Label", component = "label", 
          description = "Static text display widget with alignment and color options"},
@@ -69,7 +69,11 @@ local demo = {
         {name = "NotificationToast", component = "notificationToast",
          description = "Toast notifications: info, success, warning, error types with animations!"},
         {name = "DataGrid", component = "dataGrid",
-         description = "Data table/grid: sortable columns, selectable rows, scrollable content!"}
+         description = "Data table/grid: sortable columns, selectable rows, scrollable content!"},
+        {name = "Window", component = "window",
+         description = "Draggable window widget: moveable dialog with title bar and content area!"},
+        {name = "FilePicker", component = "filePicker",
+         description = "Beautiful file picker dialog: navigate directories, select files with icons!"}
     },
     -- Component-specific state
     state = {
@@ -183,7 +187,18 @@ local demo = {
                 }
             }
         },
-        selectedTreeNode = nil
+        selectedTreeNode = nil,
+        
+        -- Window demo state
+        windowVisible = true,
+        windowX = 5,
+        windowY = 3,
+        windowContent = "Welcome to the Window widget!\n\nThis window demonstrates:\n- Draggable title bar\n- Resizable content area\n- Close functionality\n\nTry dragging the title bar to move this window around!",
+        
+        -- FilePicker demo state
+        filePickerVisible = false,
+        selectedFilePath = "No file selected",
+        filePickerMode = "open"
     }
 }
 
@@ -337,6 +352,10 @@ function demo:createComponentDemo(component)
         self:createNotificationToastDemo()
     elseif component == "dataGrid" then
         self:createDataGridDemo()
+    elseif component == "window" then
+        self:createWindowDemo()
+    elseif component == "filePicker" then
+        self:createFilePickerDemo()
     end
 end
 
@@ -3162,14 +3181,243 @@ function demo:createDataGridDemo()
     })
 end
 
--- Add to component demo switch
-local oldCreateComponentDemo = demo.createComponentDemo
-function demo:createComponentDemo(component)
-    if component == "animation" then
-        self:createAnimationDemo()
-    else
-        oldCreateComponentDemo(self, component)
+function demo:createWindowDemo()
+    PixelUI.label({
+        x = 2, y = 2,
+        text = "Window Widget Demo",
+        color = colors.yellow
+    })
+    
+    PixelUI.label({
+        x = 2, y = 3,
+        text = "Draggable window with title bar and content area",
+        color = colors.lightGray
+    })
+
+    -- Window widget
+    if self.state.windowVisible then
+        local window = PixelUI.window({
+            x = self.state.windowX,
+            y = self.state.windowY,
+            width = 40,
+            height = 12,
+            title = "Demo Window",
+            onClose = function()
+                self.state.windowVisible = false
+                self:refreshFrame()
+            end,
+            onMove = function(newX, newY)
+                self.state.windowX = newX
+                self.state.windowY = newY
+            end
+        })
+        
+        -- Add content to the window
+        PixelUI.label({
+            x = self.state.windowX + 2,
+            y = self.state.windowY + 3,
+            text = self.state.windowContent,
+            color = colors.white,
+            parent = window
+        })
     end
+    
+    -- Button to show window if hidden
+    if not self.state.windowVisible then
+        PixelUI.button({
+            x = 2, y = 5,
+            width = 15,
+            height = 3,
+            text = "Show Window",
+            background = colors.green,
+            color = colors.white,
+            onClick = function()
+                self.state.windowVisible = true
+                self:refreshFrame()
+            end
+        })
+    end
+    
+    -- Features list
+    PixelUI.label({
+        x = 2, y = 17,
+        text = "Features:",
+        color = colors.yellow
+    })
+    
+    PixelUI.label({
+        x = 2, y = 18,
+        text = "- Draggable title bar",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 19,
+        text = "- Close button functionality",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 20,
+        text = "- Content area for other widgets",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 21,
+        text = "- Position persistence",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 23,
+        text = "Instructions: Drag the title bar to move, click X to close",
+        color = colors.lightBlue
+    })
+end
+
+function demo:createFilePickerDemo()
+    PixelUI.label({
+        x = 2, y = 2,
+        text = "FilePicker Widget Demo",
+        color = colors.yellow
+    })
+    
+    PixelUI.label({
+        x = 2, y = 3,
+        text = "Beautiful file picker dialog with navigation and file icons",
+        color = colors.lightGray
+    })
+    
+    -- Selected file display
+    PixelUI.label({
+        x = 2, y = 5,
+        text = "Selected File:",
+        color = colors.white
+    })
+    
+    PixelUI.label({
+        x = 2, y = 6,
+        text = self.state.selectedFilePath,
+        color = colors.cyan
+    })
+    
+    -- Mode selection
+    PixelUI.label({
+        x = 2, y = 8,
+        text = "Mode:",
+        color = colors.white
+    })
+    
+    PixelUI.button({
+        x = 8, y = 8,
+        width = 8,
+        height = 1,
+        text = "Open",
+        background = self.state.filePickerMode == "open" and colors.blue or colors.gray,
+        color = colors.white,
+        onClick = function()
+            self.state.filePickerMode = "open"
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 17, y = 8,
+        width = 8,
+        height = 1,
+        text = "Save",
+        background = self.state.filePickerMode == "save" and colors.blue or colors.gray,
+        color = colors.white,
+        onClick = function()
+            self.state.filePickerMode = "save"
+            self:refreshFrame()
+        end
+    })
+    
+    -- Open FilePicker button
+    PixelUI.button({
+        x = 2, y = 10,
+        width = 20,
+        height = 3,
+        text = "Open File Picker",
+        background = colors.green,
+        color = colors.white,
+        onClick = function()
+            self.state.filePickerVisible = true
+            self:refreshFrame()
+        end
+    })
+    
+    -- FilePicker widget (full-screen modal dialog)
+    if self.state.filePickerVisible then
+        local picker = PixelUI.filePicker({
+            title = self.state.filePickerMode == "open" and "Open File" or "Save File",
+            mode = self.state.filePickerMode,
+            currentPath = "/home/documents",
+            fileFilter = "*.lua",
+            showHiddenFiles = false,
+            modal = true,
+            onSelect = function(fullPath, filename, fileType)
+                self.state.selectedFilePath = fullPath
+                self.state.filePickerVisible = false
+                self:refreshFrame()
+            end,
+            onCancel = function()
+                self.state.filePickerVisible = false
+                self:refreshFrame()
+            end
+        })
+    end
+    
+    -- Features list
+    PixelUI.label({
+        x = 2, y = 16,
+        text = "Features:",
+        color = colors.yellow
+    })
+    
+    PixelUI.label({
+        x = 2, y = 17,
+        text = "- Directory navigation with icons",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 18,
+        text = "- File type icons and filtering",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 19,
+        text = "- Open and Save modes",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 20,
+        text = "- Keyboard navigation support",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 21,
+        text = "- Scrollable file list",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 22,
+        text = "- Beautiful modern design",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 24,
+        text = "Instructions: Click 'Open File Picker' to show the dialog",
+        color = colors.lightBlue
+    })
 end
 
 -- Initialize the demo

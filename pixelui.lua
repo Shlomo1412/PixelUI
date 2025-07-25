@@ -499,7 +499,7 @@ function Label:render()
         term.setBackgroundColor(self.background)
     end
     
-    local text = self.text:sub(1, self.width)
+    local text = (self.text or ""):sub(1, self.width)
     local startX = absX
     
     if self.align == "center" then
@@ -5211,6 +5211,520 @@ function MsgBox:close(result)
     end
 end
 
+-- FilePicker Widget
+local FilePicker = setmetatable({}, {__index = Widget})
+FilePicker.__index = FilePicker
+
+function FilePicker:new(props)
+    local filepicker = Widget.new(self, props)
+    filepicker.title = props.title or "Select File"
+    filepicker.currentPath = props.currentPath or "/"
+    filepicker.fileFilter = props.fileFilter or "*" -- file pattern to filter
+    filepicker.allowDirectories = props.allowDirectories or false
+    filepicker.onSelect = props.onSelect -- callback when file is selected
+    filepicker.onCancel = props.onCancel -- callback when cancelled
+    filepicker.showHiddenFiles = props.showHiddenFiles or false
+    
+    -- UI state
+    filepicker.files = {}
+    filepicker.directories = {}
+    filepicker.selectedIndex = 1
+    filepicker.scrollOffset = 0
+    filepicker.selectedFile = ""
+    filepicker.mode = props.mode or "open" -- "open" or "save"
+    filepicker.modal = props.modal ~= false -- modal by default
+    
+    -- Full-screen modal layout
+    local termWidth, termHeight = term.getSize()
+    filepicker.width = termWidth
+    filepicker.height = termHeight
+    filepicker.x = 1
+    filepicker.y = 1
+    filepicker.zIndex = 1000 -- High z-index for modal
+    
+    -- Layout properties
+    filepicker.headerHeight = 3
+    filepicker.footerHeight = 4
+    filepicker.listHeight = filepicker.height - filepicker.headerHeight - filepicker.footerHeight
+    filepicker.pathBoxHeight = 1
+    filepicker.buttonHeight = 3
+    
+    -- Load initial directory
+    filepicker:loadDirectory()
+    
+    return filepicker
+end
+
+function FilePicker:render()
+    local absX, absY = self:getAbsolutePos()
+    local theme = currentTheme
+    
+    -- Draw main background
+    term.setBackgroundColor(theme.surface or colors.lightGray)
+    for y = 0, self.height - 1 do
+        term.setCursorPos(absX, absY + y)
+        term.write(string.rep(" ", self.width))
+    end
+    
+    -- Draw border
+    drawCharBorder(absX, absY, self.width, self.height, theme.border or colors.gray, theme.surface or colors.lightGray)
+    
+    -- Draw header with title
+    term.setBackgroundColor(theme.primary or colors.blue)
+    term.setTextColor(colors.white)
+    term.setCursorPos(absX + 1, absY + 1)
+    term.write(string.rep(" ", self.width - 2))
+    
+    local titleText = " " .. self.title .. " "
+    local titleX = absX + math.floor((self.width - #titleText) / 2)
+    term.setCursorPos(titleX, absY + 1)
+    term.write(titleText)
+    
+    -- Draw current path
+    term.setBackgroundColor(theme.background or colors.black)
+    term.setTextColor(theme.text or colors.white)
+    term.setCursorPos(absX + 2, absY + 2)
+    term.write("Path: ")
+    
+    local pathDisplayWidth = self.width - 8
+    local displayPath = self.currentPath
+    if #displayPath > pathDisplayWidth then
+        displayPath = "..." .. displayPath:sub(#displayPath - pathDisplayWidth + 4)
+    end
+    term.write(displayPath)
+    
+    -- Clear remainder of path line
+    local pathLineRemaining = pathDisplayWidth - #displayPath
+    if pathLineRemaining > 0 then
+        term.write(string.rep(" ", pathLineRemaining))
+    end
+    
+    -- Draw file list area background
+    term.setBackgroundColor(colors.white)
+    for y = 0, self.listHeight - 1 do
+        term.setCursorPos(absX + 1, absY + self.headerHeight + y)
+        term.write(string.rep(" ", self.width - 2))
+    end
+    
+    -- Draw file list
+    self:drawFileList(absX + 1, absY + self.headerHeight)
+    
+    -- Draw filename input (for save mode)
+    if self.mode == "save" then
+        term.setBackgroundColor(theme.surface or colors.lightGray)
+        term.setTextColor(theme.text or colors.black)
+        term.setCursorPos(absX + 2, absY + self.height - 3)
+        term.write("Filename: ")
+        
+        -- Draw filename input box
+        term.setBackgroundColor(colors.white)
+        term.setTextColor(colors.black)
+        local filenameWidth = self.width - 12
+        term.write(self.selectedFile:sub(1, filenameWidth))
+        term.write(string.rep(" ", math.max(0, filenameWidth - #self.selectedFile)))
+    end
+    
+    -- Draw buttons
+    self:drawButtons(absX, absY + self.height - 2)
+    
+    -- Draw scrollbar if needed
+    if #self.files + #self.directories > self.listHeight then
+        self:drawScrollbar(absX + self.width - 2, absY + self.headerHeight)
+    end
+    
+    term.setBackgroundColor(colors.black)
+end
+
+function FilePicker:drawFileList(startX, startY)
+    local allItems = {}
+    
+    -- Add parent directory option
+    if self.currentPath ~= "/" then
+        table.insert(allItems, {name = "..", type = "parent", displayName = "[DIR] .."})
+    end
+    
+    -- Add directories first
+    for _, dir in ipairs(self.directories) do
+        if self.showHiddenFiles or not dir:match("^%.") then
+            -- Safety check to ensure dir is a valid string
+            if dir then
+                table.insert(allItems, {name = dir, type = "directory", displayName = "[DIR] " .. dir})
+            end
+        end
+    end
+    
+    -- Add files
+    for _, file in ipairs(self.files) do
+        if self.showHiddenFiles or not file:match("^%.") then
+            local icon = self:getFileIcon(file)
+            -- Safety check to ensure both icon and file are valid strings
+            if icon and file then
+                table.insert(allItems, {name = file, type = "file", displayName = icon .. " " .. file})
+            end
+        end
+    end
+    
+    -- Draw visible items
+    for i = 1, self.listHeight do
+        local itemIndex = i + self.scrollOffset
+        term.setCursorPos(startX, startY + i - 1)
+        
+        if itemIndex <= #allItems then
+            local item = allItems[itemIndex]
+            local isSelected = itemIndex == self.selectedIndex
+            
+            -- Set colors based on selection and type
+            if isSelected then
+                term.setBackgroundColor(currentTheme.primary or colors.blue)
+                term.setTextColor(colors.white)
+            else
+                term.setBackgroundColor(colors.white)
+                if item.type == "directory" or item.type == "parent" then
+                    term.setTextColor(colors.blue)
+                else
+                    term.setTextColor(colors.black)
+                end
+            end
+            
+            -- Truncate long names
+            local displayWidth = self.width - 4
+            local displayText = item.displayName or item.name or "Unknown"
+            if #displayText > displayWidth then
+                displayText = displayText:sub(1, displayWidth - 3) .. "..."
+            end
+            
+            term.write(displayText)
+            
+            -- Fill remainder of line
+            local remaining = displayWidth - #displayText
+            if remaining > 0 then
+                term.write(string.rep(" ", remaining))
+            end
+        else
+            -- Empty line
+            term.setBackgroundColor(colors.white)
+            term.write(string.rep(" ", self.width - 2))
+        end
+    end
+end
+
+function FilePicker:drawButtons(startX, startY)
+    local theme = currentTheme
+    local buttonY = startY
+    
+    -- Calculate button positions
+    local buttonSpacing = 2
+    local buttonWidth = 10
+    local totalButtonWidth = buttonWidth * 3 + buttonSpacing * 2
+    local buttonStartX = startX + math.floor((self.width - totalButtonWidth) / 2)
+    
+    -- OK/Open button
+    local okText = self.mode == "save" and " Save " or " Open "
+    term.setBackgroundColor(theme.success or colors.green)
+    term.setTextColor(colors.white)
+    term.setCursorPos(buttonStartX, buttonY)
+    term.write(okText .. string.rep(" ", buttonWidth - #okText))
+    
+    -- Cancel button
+    term.setBackgroundColor(theme.error or colors.red)
+    term.setTextColor(colors.white)
+    term.setCursorPos(buttonStartX + buttonWidth + buttonSpacing, buttonY)
+    term.write(" Cancel " .. string.rep(" ", buttonWidth - 8))
+    
+    -- Up directory button
+    term.setBackgroundColor(theme.secondary or colors.lightBlue)
+    term.setTextColor(colors.white)
+    term.setCursorPos(buttonStartX + (buttonWidth + buttonSpacing) * 2, buttonY)
+    term.write("   \30   ")  -- Using up arrow character from CC: Tweaked character set
+end
+
+function FilePicker:drawScrollbar(x, y)
+    local totalItems = #self.files + #self.directories + (self.currentPath ~= "/" and 1 or 0)
+    if totalItems <= self.listHeight then return end
+    
+    local scrollbarHeight = self.listHeight - 2  -- Reserve space for arrows
+    local thumbHeight = math.max(1, math.floor(scrollbarHeight * self.listHeight / totalItems))
+    local thumbPosition = math.floor(self.scrollOffset * (scrollbarHeight - thumbHeight) / (totalItems - self.listHeight))
+    
+    -- Draw up arrow
+    term.setBackgroundColor(colors.lightGray)
+    term.setTextColor(colors.black)
+    term.setCursorPos(x, y)
+    term.write("\30")  -- Up arrow
+    
+    -- Draw scrollbar track
+    term.setBackgroundColor(currentTheme.scrollbar.track or colors.gray)
+    for i = 1, scrollbarHeight do
+        term.setCursorPos(x, y + i)
+        term.write(" ")
+    end
+    
+    -- Draw scrollbar thumb
+    term.setBackgroundColor(currentTheme.scrollbar.thumb or colors.lightGray)
+    for i = 0, thumbHeight - 1 do
+        term.setCursorPos(x, y + 1 + thumbPosition + i)
+        term.write(" ")
+    end
+    
+    -- Draw down arrow
+    term.setBackgroundColor(colors.lightGray)
+    term.setTextColor(colors.black)
+    term.setCursorPos(x, y + scrollbarHeight + 1)
+    term.write("\31")  -- Down arrow
+end
+
+function FilePicker:getFileIcon(filename)
+    local ext = filename:match("%.([^%.]+)$")
+    if not ext then return "[FILE]" end
+    
+    ext = ext:lower()
+    
+    -- Common file type indicators using only CC characters
+    if ext == "lua" then return "[LUA]"
+    elseif ext == "txt" then return "[TXT]"
+    elseif ext == "json" or ext == "xml" then return "[DATA]"
+    elseif ext == "png" or ext == "jpg" or ext == "jpeg" or ext == "gif" then return "[IMG]"
+    elseif ext == "mp3" or ext == "wav" or ext == "ogg" then return "[SND]"
+    elseif ext == "mp4" or ext == "avi" or ext == "mov" then return "[VID]"
+    elseif ext == "zip" or ext == "tar" or ext == "gz" then return "[ARC]"
+    elseif ext == "exe" or ext == "app" then return "[EXE]"
+    else return "[FILE]"
+    end
+end
+
+function FilePicker:loadDirectory()
+    self.files = {}
+    self.directories = {}
+    
+    -- Use real CC: Tweaked file system
+    if fs.exists(self.currentPath) and fs.isDir(self.currentPath) then
+        local items = fs.list(self.currentPath)
+        
+        for _, item in ipairs(items) do
+            local fullPath = fs.combine(self.currentPath, item)
+            
+            if fs.isDir(fullPath) then
+                -- Add directory
+                table.insert(self.directories, item)
+            else
+                -- Add file if it matches the filter
+                if self:matchesFilter(item) then
+                    table.insert(self.files, item)
+                end
+            end
+        end
+    else
+        -- Fallback to root directory if path doesn't exist
+        self.currentPath = "/"
+        if fs.exists("/") then
+            local items = fs.list("/")
+            for _, item in ipairs(items) do
+                local fullPath = fs.combine("/", item)
+                if fs.isDir(fullPath) then
+                    table.insert(self.directories, item)
+                else
+                    if self:matchesFilter(item) then
+                        table.insert(self.files, item)
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Reset selection
+    self.selectedIndex = 1
+    self.scrollOffset = 0
+    
+    -- Sort items
+    table.sort(self.directories)
+    table.sort(self.files)
+end
+
+function FilePicker:matchesFilter(filename)
+    if self.fileFilter == "*" then return true end
+    
+    -- Simple pattern matching - in a real implementation you might want more sophisticated filtering
+    local pattern = self.fileFilter:gsub("%*", ".*")
+    return filename:match(pattern) ~= nil
+end
+
+function FilePicker:onClick(relX, relY)
+    if not self.enabled then return end
+    
+    local listStartY = self.headerHeight + 1
+    local listEndY = listStartY + self.listHeight - 1
+    
+    -- Check if click is in file list area
+    if relY >= listStartY and relY <= listEndY then
+        local clickedIndex = relY - listStartY + 1 + self.scrollOffset
+        self:selectItem(clickedIndex)
+        return true
+    end
+    
+    -- Check button clicks
+    if relY == self.height - 1 then
+        local buttonSpacing = 2
+        local buttonWidth = 8
+        local totalButtonWidth = buttonWidth * 3 + buttonSpacing * 2
+        local buttonStartX = math.floor((self.width - totalButtonWidth) / 2) + 1
+        
+        if relX >= buttonStartX and relX < buttonStartX + buttonWidth then
+            -- OK/Open/Save button
+            self:confirmSelection()
+        elseif relX >= buttonStartX + buttonWidth + buttonSpacing and relX < buttonStartX + (buttonWidth + buttonSpacing) * 2 then
+            -- Cancel button
+            self:cancel()
+        elseif relX >= buttonStartX + (buttonWidth + buttonSpacing) * 2 and relX < buttonStartX + totalButtonWidth then
+            -- Up directory button
+            self:goUpDirectory()
+        end
+        return true
+    end
+    
+    return false
+end
+
+function FilePicker:selectItem(index)
+    local allItems = self:getAllItems()
+    if index < 1 or index > #allItems then return end
+    
+    self.selectedIndex = index
+    local item = allItems[index]
+    
+    if item.type == "file" then
+        self.selectedFile = item.name
+    elseif item.type == "directory" and item.name ~= ".." then
+        -- Double-click to enter directory
+        self:enterDirectory(item.name)
+    elseif item.type == "parent" then
+        self:goUpDirectory()
+    end
+    
+    self:ensureSelectedVisible()
+end
+
+function FilePicker:getAllItems()
+    local allItems = {}
+    
+    if self.currentPath ~= "/" then
+        table.insert(allItems, {name = "..", type = "parent"})
+    end
+    
+    for _, dir in ipairs(self.directories) do
+        if self.showHiddenFiles or not dir:match("^%.") then
+            table.insert(allItems, {name = dir, type = "directory"})
+        end
+    end
+    
+    for _, file in ipairs(self.files) do
+        if self.showHiddenFiles or not file:match("^%.") then
+            table.insert(allItems, {name = file, type = "file"})
+        end
+    end
+    
+    return allItems
+end
+
+function FilePicker:ensureSelectedVisible()
+    local totalItems = #self:getAllItems()
+    
+    if self.selectedIndex <= self.scrollOffset then
+        self.scrollOffset = math.max(0, self.selectedIndex - 1)
+    elseif self.selectedIndex > self.scrollOffset + self.listHeight then
+        self.scrollOffset = self.selectedIndex - self.listHeight
+    end
+    
+    self.scrollOffset = math.max(0, math.min(self.scrollOffset, totalItems - self.listHeight))
+end
+
+function FilePicker:enterDirectory(dirName)
+    self.currentPath = fs.combine(self.currentPath, dirName)
+    self:loadDirectory()
+end
+
+function FilePicker:goUpDirectory()
+    if self.currentPath == "/" then return end
+    
+    -- Use fs.getDir to get parent directory
+    local parentPath = fs.getDir(self.currentPath)
+    self.currentPath = parentPath == "" and "/" or parentPath
+    self:loadDirectory()
+end
+
+function FilePicker:confirmSelection()
+    local allItems = self:getAllItems()
+    if self.selectedIndex > 0 and self.selectedIndex <= #allItems then
+        local item = allItems[self.selectedIndex]
+        
+        if item.type == "file" or (item.type == "directory" and self.allowDirectories) then
+            local fullPath = fs.combine(self.currentPath, item.name)
+            
+            if self.onSelect then
+                self:onSelect(fullPath, item.name, item.type)
+            end
+            
+            self.visible = false
+        elseif item.type == "directory" then
+            self:enterDirectory(item.name)
+        end
+    elseif self.mode == "save" and self.selectedFile ~= "" then
+        local fullPath = fs.combine(self.currentPath, self.selectedFile)
+        
+        if self.onSelect then
+            self:onSelect(fullPath, self.selectedFile, "file")
+        end
+        
+        self.visible = false
+    end
+end
+
+function FilePicker:cancel()
+    if self.onCancel then
+        self:onCancel()
+    end
+    self.visible = false
+end
+
+function FilePicker:handleKey(key)
+    if not self.enabled then return false end
+    
+    if key == keys.up then
+        self.selectedIndex = math.max(1, self.selectedIndex - 1)
+        self:ensureSelectedVisible()
+        return true
+    elseif key == keys.down then
+        local maxIndex = #self:getAllItems()
+        self.selectedIndex = math.min(maxIndex, self.selectedIndex + 1)
+        self:ensureSelectedVisible()
+        return true
+    elseif key == keys.enter then
+        self:confirmSelection()
+        return true
+    elseif key == keys.escape then
+        self:cancel()
+        return true
+    elseif key == keys.backspace and self.mode == "save" then
+        if #self.selectedFile > 0 then
+            self.selectedFile = self.selectedFile:sub(1, -2)
+        end
+        return true
+    end
+    
+    return false
+end
+
+function FilePicker:handleChar(char)
+    if not self.enabled then return false end
+    
+    if self.mode == "save" then
+        -- Add character to filename
+        self.selectedFile = self.selectedFile .. char
+        return true
+    end
+    
+    return false
+end
+
 -- Main PixelUI functions
 
 function PixelUI.init()
@@ -5571,6 +6085,15 @@ function PixelUI.dataGrid(props)
     return grid
 end
 
+function PixelUI.filePicker(props)
+    local picker = FilePicker:new(props)
+    table.insert(widgets, picker)
+    if rootContainer then
+        rootContainer:addChild(picker)
+    end
+    return picker
+end
+
 -- Convenience function for showing toast notifications
 function PixelUI.showToast(message, title, type, duration)
     local toast = PixelUI.notificationToast({
@@ -5599,20 +6122,13 @@ function PixelUI.render()
     term.setBackgroundColor(colors.black)
     term.clear()
 
-    -- Check for visible modal MsgBox (or Modal) and render only it if present
+    -- Check for visible modal widgets and render only them if present
     local activeModal = nil
     for _, widget in ipairs(widgets) do
-        if widget.__index == MsgBox and widget.visible then
+        if ((widget.__index == MsgBox or widget.__index == FilePicker) and widget.visible and widget.modal ~= false) or
+           (widget.__index == Modal and widget.visible) then
             activeModal = widget
             break
-        end
-    end
-    if not activeModal then
-        for _, widget in ipairs(widgets) do
-            if widget.__index == Modal and widget.visible then
-                activeModal = widget
-                break
-            end
         end
     end
 
@@ -5658,6 +6174,24 @@ function PixelUI.handleEvent(event, ...)
     
     if event == "mouse_click" then
         local button, x, y = args[1], args[2], args[3]
+
+        -- Check for modal widgets first - they should block all other interactions
+        local activeModal = nil
+        for _, widget in ipairs(widgets) do
+            if ((widget.__index == MsgBox or widget.__index == FilePicker) and widget.visible and widget.modal ~= false) or
+               (widget.__index == Modal and widget.visible) then
+                activeModal = widget
+                break
+            end
+        end
+
+        if activeModal then
+            -- Only handle events for the modal widget
+            if activeModal.handleClick then
+                activeModal:handleClick(x, y)
+            end
+            return
+        end
 
         -- Recursively traverse all widgets and their children (depth-first, z-order)
         local function traverse(list, fn)
@@ -5775,6 +6309,22 @@ function PixelUI.handleEvent(event, ...)
         
     elseif event == "key" then
         local key = args[1]
+        
+        -- Check for modal widgets first - they should block all other interactions
+        local activeModal = nil
+        for _, widget in ipairs(widgets) do
+            if ((widget.__index == MsgBox or widget.__index == FilePicker) and widget.visible and widget.modal ~= false) or
+               (widget.__index == Modal and widget.visible) then
+                activeModal = widget
+                break
+            end
+        end
+
+        if activeModal and activeModal.handleKey then
+            activeModal:handleKey(key)
+            return
+        end
+        
         local function traverse(list, fn)
             for i = #list, 1, -1 do
                 local widget = list[i]
@@ -5795,6 +6345,22 @@ function PixelUI.handleEvent(event, ...)
         end)
     elseif event == "char" then
         local char = args[1]
+        
+        -- Check for modal widgets first
+        local activeModal = nil
+        for _, widget in ipairs(widgets) do
+            if ((widget.__index == MsgBox or widget.__index == FilePicker) and widget.visible and widget.modal ~= false) or
+               (widget.__index == Modal and widget.visible) then
+                activeModal = widget
+                break
+            end
+        end
+
+        if activeModal and activeModal.handleChar then
+            activeModal:handleChar(char)
+            return
+        end
+        
         local function traverse(list, fn)
             for i = #list, 1, -1 do
                 local widget = list[i]
