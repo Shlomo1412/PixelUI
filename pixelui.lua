@@ -4294,7 +4294,7 @@ function NotificationToast:new(props)
     toast.autoHide = props.autoHide ~= false
     toast.onShow = props.onShow
     toast.onHide = props.onHide
-    toast.onClick = props.onClick
+    toast.onToastClick = props.onClick  -- Rename to avoid conflict with method name
     toast.fadeSpeed = props.fadeSpeed or 20
     toast.slideSpeed = props.slideSpeed or 10
     toast.animateIn = props.animateIn ~= false  -- Enable slide-in animation
@@ -4580,8 +4580,9 @@ function NotificationToast:onClick(relX, relY)
     if self.closeable and relX == self.width and relY == 1 then
         -- Close button clicked
         self:hide()
-    elseif self.onClick then
-        self:onClick(relX, relY)
+    elseif self.onToastClick then
+        -- Call user-provided click handler
+        self:onToastClick(relX, relY)
     end
 end
 
