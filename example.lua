@@ -10,7 +10,7 @@ PixelUI.init()
 -- Demo state and configuration
 local demo = {
     currentFrame = 1,
-    totalFrames = 26,  -- Increased to include ProgressRing and CircularProgressBar demos
+    totalFrames = 27,  -- Increased to include ProgressRing, CircularProgressBar, and TreeView demos
     frames = {
         {name = "Label", component = "label", 
          description = "Static text display widget with alignment and color options"},
@@ -32,6 +32,8 @@ local demo = {
          description = "Advanced circular progress with multiple styles and animations"},
         {name = "ListView", component = "listView", 
          description = "Scrollable list with item selection and events"},
+        {name = "TreeView", component = "treeView",
+         description = "Hierarchical data display with expandable/collapsible nodes"},
         {name = "Container", component = "container", 
          description = "Layout container for organizing child widgets"},
         {name = "ToggleSwitch", component = "toggleSwitch", 
@@ -68,11 +70,13 @@ local demo = {
     -- Component-specific state
     state = {
         textInput = "",
+        passwordInput = "",
         checkboxState = false,
         sliderValue = 50,
         rangeSliderMin = 25,
         rangeSliderMax = 75,
         progressValue = 35,
+        progressIntermediateActive = false,
         progressRingValue = 65,
         circularProgressValue = 80,
         circularProgressStyle = "filled",
@@ -106,7 +110,58 @@ local demo = {
         spinnerStyle = "classic",
         -- ScrollBar state
         scrollBarValue = 30,
-        scrollBarHValue = 60
+        scrollBarHValue = 60,
+        -- TreeView state
+        treeData = {
+            {
+                text = "Documents", 
+                expanded = true,
+                children = {
+                    {text = "Projects", expanded = false, children = {
+                        {text = "PixelUI", expanded = true, children = {
+                            {text = "pixelui.lua"},
+                            {text = "example.lua"},
+                            {text = "README.md"}
+                        }},
+                        {text = "OtherProject.lua"}
+                    }},
+                    {text = "Reports.txt"},
+                    {text = "Notes.md"}
+                }
+            },
+            {
+                text = "Pictures", 
+                expanded = false,
+                children = {
+                    {text = "Vacation2024", expanded = false, children = {
+                        {text = "beach.png"},
+                        {text = "sunset.jpg"}
+                    }},
+                    {text = "Screenshots", expanded = false, children = {
+                        {text = "screenshot1.png"},
+                        {text = "screenshot2.png"},
+                        {text = "screenshot3.png"}
+                    }}
+                }
+            },
+            {
+                text = "Programs",
+                expanded = true,
+                children = {
+                    {text = "Games", expanded = false, children = {
+                        {text = "snake.lua"},
+                        {text = "tetris.lua"}
+                    }},
+                    {text = "Utilities", expanded = false, children = {
+                        {text = "filemanager.lua"},
+                        {text = "texteditor.lua"},
+                        {text = "calculator.lua"}
+                    }},
+                    {text = "startup.lua"}
+                }
+            }
+        },
+        selectedTreeNode = nil
     }
 }
 
@@ -222,6 +277,8 @@ function demo:createComponentDemo(component)
         self:createCircularProgressBarDemo()
     elseif component == "listView" then
         self:createListViewDemo()
+    elseif component == "treeView" then
+        self:createTreeViewDemo()
     elseif component == "container" then
         self:createContainerDemo()
     elseif component == "toggleSwitch" then
@@ -371,37 +428,96 @@ end
 function demo:createTextBoxDemo()
     PixelUI.label({
         x = 2, y = 6,
-        text = "Text Input:",
+        text = "Text Input Examples:",
         color = colors.white
     })
     
-    PixelUI.textBox({
+    -- Regular text input
+    PixelUI.label({
         x = 2, y = 8,
+        text = "Regular Input:",
+        color = colors.lightGray
+    })
+    
+    PixelUI.textBox({
+        x = 2, y = 9,
         width = 30,
         placeholder = "Type something here...",
         color = colors.white,
         background = colors.black,
-        onChange = function(self, text)
+        text = self.state.textInput,
+        onChange = function(textbox, text)
             demo.state.textInput = text
         end
     })
     
     PixelUI.label({
-        x = 2, y = 10,
+        x = 2, y = 11,
         text = "You typed: " .. self.state.textInput,
         color = colors.lime
     })
     
+    -- Password/masked input
+    PixelUI.label({
+        x = 2, y = 13,
+        text = "Password Input (masked):",
+        color = colors.lightGray
+    })
+    
+    PixelUI.textBox({
+        x = 2, y = 14,
+        width = 30,
+        placeholder = "Enter password...",
+        color = colors.white,
+        background = colors.black,
+        password = true,
+        text = self.state.passwordInput,
+        onChange = function(textbox, text)
+            demo.state.passwordInput = text
+        end
+    })
+    
+    PixelUI.label({
+        x = 2, y = 16,
+        text = "Password length: " .. #self.state.passwordInput .. " characters",
+        color = colors.cyan
+    })
+    
+    -- Control buttons
     PixelUI.button({
-        x = 2, y = 12,
-        text = "Clear",
+        x = 2, y = 18,
+        text = "Clear All",
         background = colors.red,
         color = colors.white,
-        width = 8,
+        width = 10,
         height = 1,
         onClick = function()
             self.state.textInput = ""
+            self.state.passwordInput = ""
             self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 14, y = 18,
+        text = "Show Password",
+        background = colors.orange,
+        color = colors.white,
+        width = 15,
+        height = 1,
+        onClick = function()
+            if #self.state.passwordInput > 0 then
+                -- Create a temporary message box to show the password
+                PixelUI.msgBox({
+                    title = "Password Reveal",
+                    message = "Your password is:\n\n" .. self.state.passwordInput,
+                    icon = "info",
+                    buttons = {"OK"},
+                    onButton = function(msgbox, buttonIndex, buttonText)
+                        -- Close the message box
+                    end
+                })
+            end
         end
     })
 end
@@ -561,7 +677,7 @@ end
 function demo:createProgressBarDemo()
     PixelUI.label({
         x = 2, y = 6,
-        text = "Progress Bar (" .. self.state.progressValue .. "%):",
+        text = "Standard Progress Bar (" .. self.state.progressValue .. "%):",
         color = colors.white
     })
     
@@ -574,6 +690,7 @@ function demo:createProgressBarDemo()
         background = colors.gray
     })
     
+    -- Standard progress bar controls
     PixelUI.button({
         x = 2, y = 10,
         text = "+10%",
@@ -612,6 +729,114 @@ function demo:createProgressBarDemo()
             self:refreshFrame()
         end
     })
+    
+    -- Indeterminate/Intermediate Progress Bar Section
+    PixelUI.label({
+        x = 2, y = 12,
+        text = "Indeterminate Progress Bar:",
+        color = colors.white
+    })
+    
+    PixelUI.label({
+        x = 2, y = 13,
+        text = "Status: " .. (self.state.progressIntermediateActive and "Loading..." or "Idle"),
+        color = self.state.progressIntermediateActive and colors.yellow or colors.gray
+    })
+    
+    PixelUI.progressBar({
+        x = 2, y = 14,
+        width = 30,
+        value = 0, -- Value doesn't matter for intermediate mode
+        max = 100,
+        color = colors.cyan,
+        background = colors.gray,
+        intermediate = self.state.progressIntermediateActive,
+        intermediateSpeed = 3,
+        intermediateSize = 4
+    })
+    
+    -- Indeterminate progress bar controls
+    PixelUI.button({
+        x = 2, y = 16,
+        text = self.state.progressIntermediateActive and "Stop" or "Start",
+        background = self.state.progressIntermediateActive and colors.red or colors.blue,
+        color = colors.white,
+        width = 8,
+        height = 1,
+        onClick = function()
+            self.state.progressIntermediateActive = not self.state.progressIntermediateActive
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 12, y = 16,
+        text = "Simulate Task",
+        background = colors.purple,
+        color = colors.white,
+        width = 14,
+        height = 1,
+        onClick = function()
+            -- Start indeterminate progress
+            self.state.progressIntermediateActive = true
+            self:refreshFrame()
+            
+            -- Simulate a task completion after a short delay
+            -- In a real application, this would be replaced with actual async work
+            local startTime = os.clock()
+            while os.clock() - startTime < 2 do
+                -- Simulate work
+                os.sleep(0.1)
+            end
+            
+            -- Stop indeterminate progress
+            self.state.progressIntermediateActive = false
+            self:refreshFrame()
+        end
+    })
+    
+    -- Information labels
+    PixelUI.label({
+        x = 35, y = 8,
+        text = "Standard Progress:",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 35, y = 9,
+        text = "- Shows specific %",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 35, y = 10,
+        text = "- User controlled",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 35, y = 12,
+        text = "Indeterminate:",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 35, y = 13,
+        text = "- Unknown duration",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 35, y = 14,
+        text = "- Moving indicator",
+        color = colors.lightGray
+    })
+    
+    PixelUI.label({
+        x = 35, y = 15,
+        text = "- Used for loading",
+        color = colors.lightGray
+    })
 end
 
 -- ProgressRing demonstration
@@ -625,8 +850,8 @@ function demo:createProgressRingDemo()
     -- Main progress ring
     PixelUI.progressRing({
         x = 2, y = 8,
-        width = 11,
-        height = 11,
+        width = 9,
+        height = 7,
         value = self.state.progressRingValue,
         max = 100,
         color = colors.cyan,
@@ -638,9 +863,9 @@ function demo:createProgressRingDemo()
     
     -- Smaller ring with different color
     PixelUI.progressRing({
-        x = 16, y = 8,
-        width = 9,
-        height = 9,
+        x = 14, y = 8,
+        width = 7,
+        height = 7,
         value = self.state.progressRingValue * 0.8,
         max = 100,
         color = colors.lime,
@@ -651,9 +876,9 @@ function demo:createProgressRingDemo()
     
     -- Ring with custom start angle
     PixelUI.progressRing({
-        x = 28, y = 8,
-        width = 9,
-        height = 9,
+        x = 24, y = 8,
+        width = 7,
+        height = 7,
         value = self.state.progressRingValue * 1.2,
         max = 100,
         color = colors.orange,
@@ -665,7 +890,7 @@ function demo:createProgressRingDemo()
     
     -- Control buttons
     PixelUI.button({
-        x = 40, y = 8,
+        x = 34, y = 8,
         text = "+10%",
         background = colors.green,
         color = colors.white,
@@ -678,7 +903,7 @@ function demo:createProgressRingDemo()
     })
     
     PixelUI.button({
-        x = 40, y = 10,
+        x = 34, y = 10,
         text = "-10%",
         background = colors.orange,
         color = colors.white,
@@ -691,7 +916,7 @@ function demo:createProgressRingDemo()
     })
     
     PixelUI.button({
-        x = 40, y = 12,
+        x = 34, y = 12,
         text = "Random",
         background = colors.purple,
         color = colors.white,
@@ -704,7 +929,7 @@ function demo:createProgressRingDemo()
     })
     
     PixelUI.button({
-        x = 40, y = 14,
+        x = 34, y = 14,
         text = "Reset",
         background = colors.red,
         color = colors.white,
@@ -742,8 +967,8 @@ function demo:createCircularProgressBarDemo()
     -- Main circular progress with title
     PixelUI.circularProgressBar({
         x = 2, y = 8,
-        width = 13,
-        height = 13,
+        width = 9,
+        height = 7,
         value = self.state.circularProgressValue,
         max = 100,
         color = colors.cyan,
@@ -757,9 +982,9 @@ function demo:createCircularProgressBarDemo()
     
     -- Segmented style example
     PixelUI.circularProgressBar({
-        x = 18, y = 8,
-        width = 11,
-        height = 11,
+        x = 14, y = 8,
+        width = 7,
+        height = 7,
         value = self.state.circularProgressValue * 0.7,
         max = 100,
         color = colors.lime,
@@ -770,9 +995,9 @@ function demo:createCircularProgressBarDemo()
     
     -- Dots style example
     PixelUI.circularProgressBar({
-        x = 32, y = 8,
-        width = 11,
-        height = 11,
+        x = 24, y = 8,
+        width = 7,
+        height = 7,
         value = self.state.circularProgressValue * 0.9,
         max = 100,
         color = colors.orange,
@@ -912,6 +1137,126 @@ function demo:createListViewDemo()
         x = 25, y = 10,
         text = "Index: " .. self.state.selectedItem,
         color = colors.cyan
+    })
+end
+
+-- TreeView demonstration
+function demo:createTreeViewDemo()
+    PixelUI.label({
+        x = 2, y = 6,
+        text = "Tree View (Hierarchical Data):",
+        color = colors.white
+    })
+    
+    PixelUI.treeView({
+        x = 2, y = 8,
+        width = 35,
+        height = 10,
+        items = self.state.treeData,
+        color = colors.white,
+        onExpand = function(node)
+            -- Custom expand logic can go here
+            --print("Expanded: " .. node.text)
+        end,
+        onCollapse = function(node)
+            -- Custom collapse logic can go here
+            --print("Collapsed: " .. node.text)
+        end,
+        onSelect = function(node)
+            demo.state.selectedTreeNode = node
+            demo:refreshFrame()
+        end
+    })
+    
+    -- Selection info panel
+    PixelUI.label({
+        x = 40, y = 8,
+        text = "Selected Node:",
+        color = colors.white
+    })
+    
+    if self.state.selectedTreeNode and self.state.selectedTreeNode.text then
+        PixelUI.label({
+            x = 40, y = 10,
+            text = "Name: " .. self.state.selectedTreeNode.text,
+            color = colors.lime
+        })
+        
+        PixelUI.label({
+            x = 40, y = 11,
+            text = "Type: " .. (self.state.selectedTreeNode.children and "Folder" or "File"),
+            color = colors.cyan
+        })
+        
+        if self.state.selectedTreeNode.children then
+            PixelUI.label({
+                x = 40, y = 12,
+                text = "Items: " .. #self.state.selectedTreeNode.children,
+                color = colors.yellow
+            })
+            
+            PixelUI.label({
+                x = 40, y = 13,
+                text = "State: " .. (self.state.selectedTreeNode.expanded and "Expanded" or "Collapsed"),
+                color = colors.orange
+            })
+        end
+    else
+        PixelUI.label({
+            x = 40, y = 10,
+            text = "None selected",
+            color = colors.gray
+        })
+    end
+    
+    -- Control buttons
+    PixelUI.button({
+        x = 40, y = 15,
+        text = "Expand All",
+        background = colors.green,
+        color = colors.white,
+        width = 12,
+        height = 1,
+        onClick = function()
+            local function expandAll(nodes)
+                for _, node in ipairs(nodes) do
+                    if node.children then
+                        node.expanded = true
+                        expandAll(node.children)
+                    end
+                end
+            end
+            expandAll(self.state.treeData)
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 40, y = 17,
+        text = "Collapse All",
+        background = colors.orange,
+        color = colors.white,
+        width = 12,
+        height = 1,
+        onClick = function()
+            local function collapseAll(nodes)
+                for _, node in ipairs(nodes) do
+                    if node.children then
+                        node.expanded = false
+                        collapseAll(node.children)
+                    end
+                end
+            end
+            collapseAll(self.state.treeData)
+            self:refreshFrame()
+        end
+    })
+    
+    -- Instructions
+    PixelUI.label({
+        x = 2, y = 19,
+        text = "Instructions: Click '+/-' to expand/collapse folders, click names to select",
+        color = colors.lightGray
     })
 end
 

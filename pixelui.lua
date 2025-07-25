@@ -181,6 +181,10 @@ local function clamp(value, min, max)
     return value
 end
 
+local function round(x)
+    return math.floor(x + 0.5)
+end
+
 local function isPointInBounds(x, y, widget)
     return x >= widget.x and x < widget.x + widget.width and
            y >= widget.y and y < widget.y + widget.height
@@ -1257,40 +1261,8 @@ function ProgressRing:render()
     local progress = math.min(self.value / self.max, 1)
     local progressAngle = progress * 360
     
-    -- Draw ring using character-based approach
-    for y = 1, self.height do
-        for x = 1, self.width do
-            local dx = x - self.centerX
-            local dy = y - self.centerY
-            local distance = math.sqrt(dx * dx + dy * dy)
-            
-            -- Check if point is on the ring
-            if distance >= self.radius - self.thickness and distance <= self.radius then
-                -- Calculate angle for this point
-                local angle = math.deg(math.atan2(dy, dx)) + 90 -- Adjust so 0° is at top
-                if angle < 0 then angle = angle + 360 end
-                
-                -- Adjust for start angle and direction
-                local adjustedAngle = self.clockwise and (angle - self.startAngle) or (self.startAngle - angle)
-                if adjustedAngle < 0 then adjustedAngle = adjustedAngle + 360 end
-                if adjustedAngle > 360 then adjustedAngle = adjustedAngle - 360 end
-                
-                local color = self.background
-                if adjustedAngle <= progressAngle then
-                    color = self.color
-                end
-                
-                -- Draw markers at quarters if enabled
-                if self.showMarkers and (adjustedAngle % 90 < 5 or adjustedAngle % 90 > 355) then
-                    color = self.markerColor
-                end
-                
-                term.setBackgroundColor(color)
-                term.setCursorPos(absX + x - 1, absY + y - 1)
-                term.write(" ")
-            end
-        end
-    end
+    -- Draw ring using thin border characters
+    self:drawRingBorder(absX, absY, progressAngle)
     
     -- Draw center value if enabled
     if self.showValue then
@@ -1305,6 +1277,71 @@ function ProgressRing:render()
     end
     
     term.setBackgroundColor(colors.black)
+end
+
+function ProgressRing:drawRingBorder(absX, absY, progressAngle)
+    local radius = self.radius
+    
+    -- Define the ring points to draw (approximating a circle)
+    local ringPoints = {}
+    
+    -- Top and bottom horizontal segments
+    for x = -radius + 1, radius - 1 do
+        table.insert(ringPoints, {x = x, y = -radius, char = "\131"}) -- Top horizontal
+        table.insert(ringPoints, {x = x, y = radius, char = "\143"})   -- Bottom horizontal
+    end
+    
+    -- Left and right vertical segments  
+    for y = -radius + 1, radius - 1 do
+        table.insert(ringPoints, {x = -radius, y = y, char = "\149"}) -- Left vertical
+        table.insert(ringPoints, {x = radius, y = y, char = "\149"})  -- Right vertical
+    end
+    
+    -- Corner pieces
+    table.insert(ringPoints, {x = -radius, y = -radius, char = "\151"}) -- Top-left
+    table.insert(ringPoints, {x = radius, y = -radius, char = "\148"})   -- Top-right
+    table.insert(ringPoints, {x = -radius, y = radius, char = "\138"})   -- Bottom-left
+    table.insert(ringPoints, {x = radius, y = radius, char = "\133"})    -- Bottom-right
+    
+    -- Draw each ring point
+    for _, point in ipairs(ringPoints) do
+        local screenX = absX + self.centerX + point.x - 1
+        local screenY = absY + self.centerY + point.y - 1
+        
+        -- Check if point is within widget bounds
+        if screenX >= absX and screenX < absX + self.width and 
+           screenY >= absY and screenY < absY + self.height then
+            
+            -- Calculate angle for this point
+            local angle = math.deg(math.atan2(point.y, point.x)) + 90
+            if angle < 0 then angle = angle + 360 end
+            
+            -- Adjust for start angle and direction
+            local adjustedAngle = self.clockwise and (angle - self.startAngle) or (self.startAngle - angle)
+            if adjustedAngle < 0 then adjustedAngle = adjustedAngle + 360 end
+            if adjustedAngle > 360 then adjustedAngle = adjustedAngle - 360 end
+            
+            -- Determine color based on progress
+            local fgColor = self.background
+            local bgColor = self.centerColor
+            
+            if adjustedAngle <= progressAngle then
+                fgColor = self.color
+            end
+            
+            -- Draw markers at quarters if enabled
+            if self.showMarkers and (adjustedAngle % 90 < 15 or adjustedAngle % 90 > 345) then
+                fgColor = self.markerColor
+            end
+            
+            -- Use safe hex color conversion
+            local fgHex = getColorHex(fgColor) or "f"
+            local bgHex = getColorHex(bgColor) or "0"
+            
+            term.setCursorPos(screenX, screenY)
+            term.blit(point.char, fgHex, bgHex)
+        end
+    end
 end
 
 -- CircularProgressBar Widget
@@ -1386,52 +1423,33 @@ end
 function CircularProgressBar:drawFilledProgress(absX, absY, progress)
     local progressAngle = progress * 360
     
-    for y = 1, self.height do
-        for x = 1, self.width do
-            local dx = x - self.centerX
-            local dy = y - self.centerY
-            local distance = math.sqrt(dx * dx + dy * dy)
-            
-            -- Check if point is on the circle edge
-            if math.abs(distance - self.radius) <= 0.7 then
-                -- Calculate angle for this point
-                local angle = math.deg(math.atan2(dy, dx)) + 90 -- Adjust so 0° is at top
-                if angle < 0 then angle = angle + 360 end
-                
-                -- Add animation offset if enabled
-                local adjustedAngle = (angle + self.animationOffset) % 360
-                
-                local color = self.background
-                if adjustedAngle <= progressAngle or (self.animated and adjustedAngle <= progressAngle + 30) then
-                    color = self.color
-                end
-                
-                term.setBackgroundColor(color)
-                term.setCursorPos(absX + x - 1, absY + y - 1)
-                term.write(" ")
-            end
-        end
+    -- Add animation offset if enabled
+    if self.animated then
+        progressAngle = progressAngle + self.animationOffset
     end
+    
+    -- Draw using thin border characters like ProgressRing
+    self:drawCircularBorder(absX, absY, progressAngle)
 end
 
 function CircularProgressBar:drawSegmentedProgress(absX, absY, progress)
     local filledSegments = math.floor(progress * self.segments)
     local segmentAngle = 360 / self.segments
     
+    -- Calculate which segments to fill
     for segment = 0, self.segments - 1 do
         local startAngle = segment * segmentAngle
         local endAngle = (segment + 1) * segmentAngle
-        local color = segment < filledSegments and self.color or self.background
+        local shouldFill = segment < filledSegments
         
         -- Add animation effect
         if self.animated then
-            local animSegment = ((segment - math.floor(self.animationOffset / segmentAngle)) % self.segments)
-            if animSegment < filledSegments then
-                color = self.color
-            end
+            local animSegment = (segment + math.floor(self.animationOffset / segmentAngle)) % self.segments
+            shouldFill = animSegment < filledSegments
         end
         
-        self:drawSegmentArc(absX, absY, startAngle, endAngle, color)
+        -- Draw this segment
+        self:drawSegmentArc(absX, absY, startAngle, endAngle, shouldFill)
     end
 end
 
@@ -1442,39 +1460,132 @@ function CircularProgressBar:drawDottedProgress(absX, absY, progress)
     
     for dot = 0, totalDots - 1 do
         local angle = dot * dotAngle
-        local color = dot < filledDots and self.color or self.background
+        local shouldFill = dot < filledDots
         
-        -- Calculate dot position
+        -- Add animation effect
+        if self.animated then
+            local animDot = (dot + math.floor(self.animationOffset / dotAngle)) % totalDots
+            shouldFill = animDot < filledDots
+        end
+        
+        -- Calculate dot position on the circle
         local radians = math.rad(angle - 90) -- Adjust so 0° is at top
-        local dotX = self.centerX + math.cos(radians) * self.radius
-        local dotY = self.centerY + math.sin(radians) * self.radius
+        local dotX = self.centerX + round(math.cos(radians) * self.radius)
+        local dotY = self.centerY + round(math.sin(radians) * self.radius)
         
-        -- Draw dot
+        -- Draw dot using appropriate character
         if dotX >= 1 and dotX <= self.width and dotY >= 1 and dotY <= self.height then
-            term.setBackgroundColor(color)
-            term.setCursorPos(absX + math.floor(dotX) - 1, absY + math.floor(dotY) - 1)
-            term.write(" ")
+            local screenX = absX + dotX - 1
+            local screenY = absY + dotY - 1
+            
+            local fgColor = shouldFill and self.color or self.background
+            local bgColor = self.centerColor
+            local fgHex = getColorHex(fgColor) or "f"
+            local bgHex = getColorHex(bgColor) or "0"
+            
+            term.setCursorPos(screenX, screenY)
+            term.blit("*", fgHex, bgHex) -- Use * for dots
         end
     end
 end
 
-function CircularProgressBar:drawSegmentArc(absX, absY, startAngle, endAngle, color)
-    for y = 1, self.height do
-        for x = 1, self.width do
-            local dx = x - self.centerX
-            local dy = y - self.centerY
-            local distance = math.sqrt(dx * dx + dy * dy)
+function CircularProgressBar:drawSegmentArc(absX, absY, startAngle, endAngle, shouldFill)
+    local radius = self.radius
+    
+    -- Simple approach: draw border characters in the segment range
+    local circlePoints = {}
+    
+    -- Add points around the circle
+    for angle = startAngle, endAngle, 5 do -- Sample every 5 degrees
+        local radians = math.rad(angle - 90)
+        local x = round(math.cos(radians) * radius)
+        local y = round(math.sin(radians) * radius)
+        
+        -- Choose appropriate border character based on position
+        local char = "\149" -- Default to vertical line
+        if math.abs(x) > math.abs(y) then
+            char = x < 0 and "\149" or "\149" -- Vertical for sides
+        else
+            char = y < 0 and "\131" or "\143" -- Horizontal for top/bottom
+        end
+        
+        table.insert(circlePoints, {x = x, y = y, char = char})
+    end
+    
+    -- Draw the segment points
+    for _, point in ipairs(circlePoints) do
+        local screenX = absX + self.centerX + point.x - 1
+        local screenY = absY + self.centerY + point.y - 1
+        
+        if screenX >= absX and screenX < absX + self.width and 
+           screenY >= absY and screenY < absY + self.height then
             
-            if math.abs(distance - self.radius) <= 0.7 then
-                local angle = math.deg(math.atan2(dy, dx)) + 90
-                if angle < 0 then angle = angle + 360 end
-                
-                if angle >= startAngle and angle <= endAngle then
-                    term.setBackgroundColor(color)
-                    term.setCursorPos(absX + x - 1, absY + y - 1)
-                    term.write(" ")
-                end
+            local fgColor = shouldFill and self.color or self.background
+            local bgColor = self.centerColor
+            local fgHex = getColorHex(fgColor) or "f"
+            local bgHex = getColorHex(bgColor) or "0"
+            
+            term.setCursorPos(screenX, screenY)
+            term.blit(point.char, fgHex, bgHex)
+        end
+    end
+end
+
+function CircularProgressBar:drawCircularBorder(absX, absY, progressAngle)
+    local radius = self.radius
+    
+    -- Define the circle points using border characters
+    local circlePoints = {}
+    
+    -- Top and bottom horizontal segments
+    for x = -radius + 1, radius - 1 do
+        table.insert(circlePoints, {x = x, y = -radius, char = "\131"}) -- Top horizontal
+        table.insert(circlePoints, {x = x, y = radius, char = "\143"})   -- Bottom horizontal
+    end
+    
+    -- Left and right vertical segments  
+    for y = -radius + 1, radius - 1 do
+        table.insert(circlePoints, {x = -radius, y = y, char = "\149"}) -- Left vertical
+        table.insert(circlePoints, {x = radius, y = y, char = "\149"})  -- Right vertical
+    end
+    
+    -- Corner pieces for rounded appearance
+    table.insert(circlePoints, {x = -radius, y = -radius, char = "\151"}) -- Top-left
+    table.insert(circlePoints, {x = radius, y = -radius, char = "\148"})   -- Top-right
+    table.insert(circlePoints, {x = -radius, y = radius, char = "\138"})   -- Bottom-left
+    table.insert(circlePoints, {x = radius, y = radius, char = "\133"})    -- Bottom-right
+    
+    -- Draw each circle point
+    for _, point in ipairs(circlePoints) do
+        local screenX = absX + self.centerX + point.x - 1
+        local screenY = absY + self.centerY + point.y - 1
+        
+        -- Check if point is within widget bounds
+        if screenX >= absX and screenX < absX + self.width and 
+           screenY >= absY and screenY < absY + self.height then
+            
+            -- Calculate angle for this point
+            local angle = math.deg(math.atan2(point.y, point.x)) + 90
+            if angle < 0 then angle = angle + 360 end
+            
+            -- Normalize angle to 0-360
+            while angle >= 360 do angle = angle - 360 end
+            while angle < 0 do angle = angle + 360 end
+            
+            -- Determine color based on progress
+            local fgColor = self.background
+            local bgColor = self.centerColor
+            
+            if angle <= progressAngle then
+                fgColor = self.color
             end
+            
+            -- Use safe hex color conversion
+            local fgHex = getColorHex(fgColor) or "f"
+            local bgHex = getColorHex(bgColor) or "0"
+            
+            term.setCursorPos(screenX, screenY)
+            term.blit(point.char, fgHex, bgHex)
         end
     end
 end
@@ -3396,40 +3507,45 @@ end
 function TreeView:onClick(relX, relY)
     if not self.enabled then return end
     
-    local function findNodeAt(items, depth, targetY, currentY)
-        for _, node in ipairs(items) do
-            if currentY == targetY then
-                -- Check if expand/collapse button was clicked
-                local buttonX = depth * 2 + 1
-                if relX >= buttonX and relX < buttonX + 2 and node.children and #node.children > 0 then
-                    node.expanded = not node.expanded
-                    if node.expanded and self.onExpand then
-                        self:onExpand(node)
-                    elseif not node.expanded and self.onCollapse then
-                        self:onCollapse(node)
+    local function countNodesBeforeY(items, depth, targetY)
+        local currentY = 1
+        
+        local function traverse(nodes, currentDepth)
+            for _, node in ipairs(nodes) do
+                if currentY == targetY then
+                    -- Check if expand/collapse button was clicked
+                    local buttonX = currentDepth * 2 + 1
+                    if relX >= buttonX and relX < buttonX + 2 and node.children and #node.children > 0 then
+                        node.expanded = not node.expanded
+                        if node.expanded and self.onExpand then
+                            self:onExpand(node)
+                        elseif not node.expanded and self.onCollapse then
+                            self:onCollapse(node)
+                        end
+                    else
+                        self.selectedItem = node
+                        if self.onSelect then
+                            self:onSelect(node)
+                        end
                     end
-                else
-                    self.selectedItem = node
-                    if self.onSelect then
-                        self:onSelect(node)
-                    end
-                end
-                return true
-            end
-            
-            currentY = currentY + 1
-            
-            if node.expanded and node.children then
-                if findNodeAt(node.children, depth + 1, targetY, currentY) then
                     return true
                 end
-                currentY = currentY + #node.children
+                
+                currentY = currentY + 1
+                
+                if node.expanded and node.children then
+                    if traverse(node.children, currentDepth + 1) then
+                        return true
+                    end
+                end
             end
+            return false
         end
-        return false
+        
+        return traverse(items, depth)
     end
     
-    findNodeAt(self.items, 0, relY + self.scrollOffset, 1)
+    countNodesBeforeY(self.items, 0, relY + self.scrollOffset)
 end
 
 -- ColorPicker Widget
