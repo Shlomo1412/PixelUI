@@ -2327,7 +2327,7 @@ function RadioButton:render()
     term.setTextColor(self.color)
     term.setCursorPos(absX, absY)
     
-    local radioChar = self.checked and "-" or "o"  -- Dash for selected, o for unselected
+    local radioChar = self.checked and "\7" or "o"  -- Dash for selected, o for unselected
     term.write(radioChar .. " " .. self.text)
     
     term.setBackgroundColor(colors.black)
@@ -2381,7 +2381,8 @@ function ComboBox:render()
     term.setCursorPos(absX, absY)
     local selectedText = self.items[self.selectedIndex] or ""
     local displayText = selectedText:sub(1, self.width - 2)
-    term.write(displayText .. string.rep(" ", self.width - 2 - #displayText) .. "v")
+    local arrowChar = self.isOpen and "\30" or "\31"  -- Up arrow when open, down arrow when closed
+    term.write(displayText .. string.rep(" ", self.width - 2 - #displayText) .. arrowChar)
     
     -- Draw dropdown if open
     if self.isOpen then
