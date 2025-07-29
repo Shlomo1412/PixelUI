@@ -6,6 +6,7 @@ A modern, feature-rich, extensible UI framework for ComputerCraft and CC: Tweake
 
 ---
 
+
 ## 🚀 Super Features
 
 - **Comprehensive Widget Library**: Buttons, labels, text boxes, checkboxes, sliders, range sliders, progress bars, list views, containers, group boxes, color pickers, color picker dialogs, tab controls, combo boxes, numeric up/down, spinners, loading indicators, scrollbars, modal dialogs, charts, draggable widgets, notification toasts, data grids/tables, and more.
@@ -20,6 +21,7 @@ A modern, feature-rich, extensible UI framework for ComputerCraft and CC: Tweake
 - **Pixel Canvas**: Draw pixel-level graphics with the Canvas widget.
 - **Extensible**: Easily add your own widgets or extend existing ones.
 - **Demo Suite**: Includes a full-featured demo app showcasing every widget and feature.
+- **Cooperative Threading/Tasks**: Run background tasks or long-running code in parallel with the UI using the built-in thread system. Keep your UI responsive while doing work in the background!
 
 ---
 
@@ -72,10 +74,77 @@ container:addChild(PixelUI.label({ x = 2, y = 2, text = "Inside!" }))
 
 - Set `isScrollable = true` on a container. Add children as usual. If content exceeds the container, scrollbars appear and mouse wheel works.
 
+
 ### 5. **Event Handling**
 
 - All widgets support `onClick`, and many support `onChange`, `onSelect`, `onToggle`, etc.
 - Keyboard and mouse events are handled automatically by `PixelUI.run()`.
+
+
+### 5.5 **Background Tasks & Threading**
+
+PixelUI includes a built-in cooperative thread/task system, allowing you to run background code without freezing the UI. This is perfect for network requests, file I/O, or any long-running logic.
+
+**Important:**
+- Do **not** use `os.sleep()` in your threads! `os.sleep()` will freeze the entire UI and all threads. Instead, use `PixelUI.thread.sleep(seconds)` for non-blocking sleep.
+
+**API:**
+
+```lua
+local id = PixelUI.thread.new(function(...)
+  -- Your background code here
+  for i = 1, 10 do
+    print("Thread tick", i)
+    PixelUI.thread.sleep(1) -- This yields to the UI without freezing
+  end
+end)
+
+-- You can start as many threads as you want, at any time.
+-- Threads are automatically scheduled alongside the UI.
+
+-- To stop a thread early:
+PixelUI.thread.stop(id)
+
+-- To get the number of running threads:
+print(PixelUI.thread.count())
+```
+
+**Real-world Example: Non-blocking Progress Bar**
+
+```lua
+local PixelUI = require("pixelui")
+PixelUI.init()
+
+local statusLabel = PixelUI.label({
+  x = 2, y = 2, text = "Press the button to start a background task...",
+  color = colors.cyan,
+  width = 40
+})
+
+local progressBar = PixelUI.progressBar({
+  x = 2, y = 4, width = 30, progress = 0,
+  text = "Progress"
+})
+
+PixelUI.button({
+  x = 2, y = 6, text = "Start Background Task",
+  onClick = function()
+    statusLabel.text = "Task running in background..."
+    progressBar.progress = 0
+    PixelUI.thread.new(function()
+      for i = 1, 10 do
+        PixelUI.thread.sleep(0.5) -- Non-blocking sleep!
+        progressBar.progress = i * 10
+      end
+      statusLabel.text = "Task complete! UI never froze."
+    end)
+  end
+})
+
+PixelUI.run()
+```
+
+Threads are cooperative: they must yield (e.g. via `PixelUI.thread.sleep`, `coroutine.yield`, or waiting for events) to allow the UI to update. You can safely update widgets from a thread, but be careful with shared state.
 
 ### 6. **Animation**
 

@@ -4,7 +4,6 @@
 
 local PixelUI = {}
 
--- Global state
 local widgets = {}
 local rootContainer = nil
 local eventQueue = {}
@@ -12,6 +11,92 @@ local running = false
 local isDragging = false
 local draggedWidget = nil
 local focusedWidget = nil  -- Track globally focused widget
+
+local ThreadManager = {
+    threads = {},
+    nextId = 1,
+    sleeping = {} -- { {co, id, wakeTime, args, status} }
+}
+
+function ThreadManager:new(fn, ...)
+    local co = coroutine.create(fn)
+    local id = self.nextId
+    self.nextId = self.nextId + 1
+    table.insert(self.threads, {co = co, id = id, args = {...}, status = "running"})
+    return id
+end
+
+function ThreadManager:runAll()
+    local now = os.epoch and os.epoch("utc")/1000 or os.clock()
+    -- Wake up sleeping threads whose time has come
+    local i = 1
+    while i <= #self.sleeping do
+        local t = self.sleeping[i]
+        if now >= t.wakeTime then
+            table.insert(self.threads, t)
+            table.remove(self.sleeping, i)
+        else
+            i = i + 1
+        end
+    end
+    -- Run all active threads
+    i = 1
+    while i <= #self.threads do
+        local thread = self.threads[i]
+        if coroutine.status(thread.co) == "dead" or thread.status == "stopped" then
+            table.remove(self.threads, i)
+        else
+            local ok, res, param = coroutine.resume(thread.co, table.unpack(thread.args))
+            if not ok then
+                print("[PixelUI Thread Error]", res)
+                thread.status = "stopped"
+                table.remove(self.threads, i)
+            elseif res == "__sleep" and type(param) == "number" then
+                -- Move to sleeping queue
+                thread.wakeTime = now + param
+                table.insert(self.sleeping, thread)
+                table.remove(self.threads, i)
+            else
+                i = i + 1
+            end
+        end
+    end
+end
+
+function ThreadManager:stop(id)
+    for i, thread in ipairs(self.threads) do
+        if thread.id == id then
+            thread.status = "stopped"
+            break
+        end
+    end
+    for i, thread in ipairs(self.sleeping) do
+        if thread.id == id then
+            thread.status = "stopped"
+            break
+        end
+    end
+end
+
+function ThreadManager:count()
+    return #self.threads + #self.sleeping
+end
+
+local ThreadAPI = {}
+function ThreadAPI.new(fn, ...)
+    return ThreadManager:new(fn, ...)
+end
+function ThreadAPI.stop(id)
+    ThreadManager:stop(id)
+end
+function ThreadAPI.count()
+    return ThreadManager:count()
+end
+function ThreadAPI.sleep(seconds)
+    return coroutine.yield("__sleep", seconds)
+end
+
+PixelUI.thread = ThreadAPI
 
 -- Advanced Animation System
 local AnimationManager = {
@@ -5747,9 +5832,12 @@ function PixelUI.run(userConfig)
     -- userConfig: { onKey, onEvent, onQuit, ... } (optional)
     local animationInterval = 0.05 -- 20 FPS
     local timerId = os.startTimer(animationInterval)
-    local running = true
+    running = true
     if userConfig and userConfig.onStart then userConfig.onStart() end
     while running do
+        -- Run all threads (cooperative multitasking)
+        ThreadManager:runAll()
+
         animationFrame() -- update all animations
         PixelUI.updateToasts() -- update toast notifications
         PixelUI.render()
