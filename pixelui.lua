@@ -4,6 +4,7 @@
 
 local PixelUI = {}
 
+-- Global state
 local widgets = {}
 local rootContainer = nil
 local eventQueue = {}
@@ -12,91 +13,153 @@ local isDragging = false
 local draggedWidget = nil
 local focusedWidget = nil  -- Track globally focused widget
 
+-- Thread Management System
 local ThreadManager = {
     threads = {},
     nextId = 1,
-    sleeping = {} -- { {co, id, wakeTime, args, status} }
+    running = false,
+    mainUICoroutine = nil
 }
 
-function ThreadManager:new(fn, ...)
-    local co = coroutine.create(fn)
+function ThreadManager:create(func, name)
     local id = self.nextId
     self.nextId = self.nextId + 1
-    table.insert(self.threads, {co = co, id = id, args = {...}, status = "running"})
-    return id
+    
+    local thread = {
+        id = id,
+        name = name or ("Thread_" .. id),
+        coroutine = coroutine.create(func),
+        status = "created",
+        lastError = nil,
+        startTime = os.clock(),
+        onError = nil,
+        onComplete = nil
+    }
+    
+    self.threads[id] = thread
+    return id, thread
 end
 
-function ThreadManager:runAll()
-    local now = os.epoch and os.epoch("utc")/1000 or os.clock()
-    -- Wake up sleeping threads whose time has come
-    local i = 1
-    while i <= #self.sleeping do
-        local t = self.sleeping[i]
-        if now >= t.wakeTime then
-            table.insert(self.threads, t)
-            table.remove(self.sleeping, i)
-        else
-            i = i + 1
-        end
+function ThreadManager:remove(id)
+    if self.threads[id] then
+        self.threads[id] = nil
+        return true
     end
-    -- Run all active threads
-    i = 1
-    while i <= #self.threads do
-        local thread = self.threads[i]
-        if coroutine.status(thread.co) == "dead" or thread.status == "stopped" then
-            table.remove(self.threads, i)
+    return false
+end
+
+function ThreadManager:get(id)
+    return self.threads[id]
+end
+
+function ThreadManager:getAll()
+    local result = {}
+    for id, thread in pairs(self.threads) do
+        table.insert(result, thread)
+    end
+    return result
+end
+
+function ThreadManager:isAlive(id)
+    local thread = self.threads[id]
+    return thread and (thread.status == "running" or thread.status == "suspended")
+end
+
+function ThreadManager:kill(id)
+    if self.threads[id] then
+        self.threads[id].status = "killed"
+        return true
+    end
+    return false
+end
+
+function ThreadManager:resumeThread(thread, ...)
+    if not thread or thread.status == "dead" or thread.status == "killed" then
+        return false
+    end
+    
+    local success, result = coroutine.resume(thread.coroutine, ...)
+    
+    if not success then
+        thread.status = "error"
+        thread.lastError = result
+        if thread.onError then
+            thread.onError(result, thread)
         else
-            local ok, res, param = coroutine.resume(thread.co, table.unpack(thread.args))
-            if not ok then
-                print("[PixelUI Thread Error]", res)
-                thread.status = "stopped"
-                table.remove(self.threads, i)
-            elseif res == "__sleep" and type(param) == "number" then
-                -- Move to sleeping queue
-                thread.wakeTime = now + param
-                table.insert(self.sleeping, thread)
-                table.remove(self.threads, i)
-            else
-                i = i + 1
+            -- Default error handling - show as toast if available
+            if PixelUI.showToast then
+                PixelUI.showToast("Thread Error: " .. tostring(result), thread.name, "error")
             end
         end
+        return false
+    end
+    
+    if coroutine.status(thread.coroutine) == "dead" then
+        thread.status = "completed"
+        if thread.onComplete then
+            thread.onComplete(thread)
+        end
+        return false
+    else
+        thread.status = "suspended"
+        return true
     end
 end
 
-function ThreadManager:stop(id)
-    for i, thread in ipairs(self.threads) do
-        if thread.id == id then
-            thread.status = "stopped"
-            break
+function ThreadManager:step()
+    -- Resume all threads
+    local toRemove = {}
+    
+    for id, thread in pairs(self.threads) do
+        if thread.status == "created" or thread.status == "suspended" then
+            thread.status = "running"
+            local stillRunning = self:resumeThread(thread)
+            
+            if not stillRunning then
+                table.insert(toRemove, id)
+            end
+        elseif thread.status == "error" or thread.status == "completed" or thread.status == "killed" then
+            table.insert(toRemove, id)
         end
     end
-    for i, thread in ipairs(self.sleeping) do
-        if thread.id == id then
-            thread.status = "stopped"
-            break
-        end
+    
+    -- Clean up finished threads
+    for _, id in ipairs(toRemove) do
+        self:remove(id)
     end
 end
 
-function ThreadManager:count()
-    return #self.threads + #self.sleeping
+function ThreadManager:stopAll()
+    for id, thread in pairs(self.threads) do
+        thread.status = "killed"
+    end
+    self.threads = {}
 end
 
-local ThreadAPI = {}
-function ThreadAPI.new(fn, ...)
-    return ThreadManager:new(fn, ...)
+function ThreadManager:getStats()
+    local stats = {
+        total = 0,
+        running = 0,
+        suspended = 0,
+        error = 0,
+        completed = 0
+    }
+    
+    for _, thread in pairs(self.threads) do
+        stats.total = stats.total + 1
+        if thread.status == "running" or thread.status == "created" then
+            stats.running = stats.running + 1
+        elseif thread.status == "suspended" then
+            stats.suspended = stats.suspended + 1
+        elseif thread.status == "error" then
+            stats.error = stats.error + 1
+        elseif thread.status == "completed" then
+            stats.completed = stats.completed + 1
+        end
+    end
+    
+    return stats
 end
-function ThreadAPI.stop(id)
-    ThreadManager:stop(id)
-end
-function ThreadAPI.count()
-    return ThreadManager:count()
-end
-function ThreadAPI.sleep(seconds)
-    return coroutine.yield("__sleep", seconds)
-end
-
-PixelUI.thread = ThreadAPI
 
 -- Advanced Animation System
 local AnimationManager = {
@@ -5829,19 +5892,30 @@ end
 
 -- Developer-friendly: PixelUI handles the event loop and animation internally
 function PixelUI.run(userConfig)
-    -- userConfig: { onKey, onEvent, onQuit, ... } (optional)
+    -- userConfig: { onKey, onEvent, onQuit, onStart, ... } (optional)
     local animationInterval = 0.05 -- 20 FPS
     local timerId = os.startTimer(animationInterval)
-    running = true
+    local running = true
+    
+    -- Initialize thread manager
+    ThreadManager.running = true
+    
     if userConfig and userConfig.onStart then userConfig.onStart() end
+    
     while running do
-        -- Run all threads (cooperative multitasking)
-        ThreadManager:runAll()
-
+        -- Step through all background threads
+        ThreadManager:step()
+        
+        -- Update animations and toasts
         animationFrame() -- update all animations
         PixelUI.updateToasts() -- update toast notifications
+        
+        -- Render the UI
         PixelUI.render()
+        
+        -- Handle events
         local event, p1, p2, p3, p4, p5 = os.pullEvent()
+        
         if event == "timer" and p1 == timerId then
             timerId = os.startTimer(animationInterval)
         else
@@ -5863,6 +5937,11 @@ function PixelUI.run(userConfig)
             end
         end
     end
+    
+    -- Clean up threads
+    ThreadManager:stopAll()
+    ThreadManager.running = false
+    
     if userConfig and userConfig.onQuit then userConfig.onQuit() end
     term.setBackgroundColor(colors.black)
     term.clear()
@@ -6497,6 +6576,105 @@ function PixelUI.getFocusedWidget()
     return getFocusedWidget()
 end
 
+-- Thread Management API
+function PixelUI.spawnThread(func, name)
+    if type(func) ~= "function" then
+        error("PixelUI.spawnThread: first argument must be a function")
+    end
+    return ThreadManager:create(func, name)
+end
+
+function PixelUI.killThread(id)
+    return ThreadManager:kill(id)
+end
+
+function PixelUI.getThread(id)
+    return ThreadManager:get(id)
+end
+
+function PixelUI.getAllThreads()
+    return ThreadManager:getAll()
+end
+
+function PixelUI.isThreadAlive(id)
+    return ThreadManager:isAlive(id)
+end
+
+function PixelUI.getThreadStats()
+    return ThreadManager:getStats()
+end
+
+function PixelUI.onThreadError(id, callback)
+    local thread = ThreadManager:get(id)
+    if thread then
+        thread.onError = callback
+        return true
+    end
+    return false
+end
+
+function PixelUI.onThreadComplete(id, callback)
+    local thread = ThreadManager:get(id)
+    if thread then
+        thread.onComplete = callback
+        return true
+    end
+    return false
+end
+
+-- Convenience function for running a task with automatic UI updates
+function PixelUI.runAsync(func, options)
+    options = options or {}
+    local taskName = options.name or "AsyncTask"
+    local showProgress = options.showProgress
+    local progressWidget = nil
+    
+    if showProgress then
+        progressWidget = PixelUI.loadingIndicator({
+            x = options.progressX or 1,
+            y = options.progressY or 1,
+            width = options.progressWidth or 20,
+            text = options.progressText or "Loading...",
+            style = options.progressStyle or "bar"
+        })
+    end
+    
+    local threadId = PixelUI.spawnThread(function()
+        local success, result = pcall(func)
+        
+        -- Hide progress indicator
+        if progressWidget then
+            progressWidget.visible = false
+        end
+        
+        if success then
+            if options.onSuccess then
+                options.onSuccess(result)
+            end
+        else
+            if options.onError then
+                options.onError(result)
+            else
+                PixelUI.showToast("Task failed: " .. tostring(result), taskName, "error")
+            end
+        end
+        
+        if options.onComplete then
+            options.onComplete(success, result)
+        end
+    end, taskName)
+    
+    return threadId, progressWidget
+end
+
+-- Sleep function that works properly in threads
+function PixelUI.sleep(duration)
+    local startTime = os.clock()
+    while os.clock() - startTime < duration do
+        coroutine.yield()
+    end
+end
+
 -- Export all widget classes for advanced usage
 PixelUI.Widget = Widget
 PixelUI.Label = Label
@@ -6534,5 +6712,8 @@ PixelUI.LoadingIndicator = LoadingIndicator
 PixelUI.Spinner = Spinner
 PixelUI.NotificationToast = NotificationToast
 PixelUI.DataGrid = DataGrid
+
+-- Export thread manager for advanced usage
+PixelUI.ThreadManager = ThreadManager
 
 return PixelUI

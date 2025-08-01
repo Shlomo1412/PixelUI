@@ -6,10 +6,10 @@ A modern, feature-rich, extensible UI framework for ComputerCraft and CC: Tweake
 
 ---
 
-
 ## 🚀 Super Features
 
 - **Comprehensive Widget Library**: Buttons, labels, text boxes, checkboxes, sliders, range sliders, progress bars, list views, containers, group boxes, color pickers, color picker dialogs, tab controls, combo boxes, numeric up/down, spinners, loading indicators, scrollbars, modal dialogs, charts, draggable widgets, notification toasts, data grids/tables, and more.
+- **Background Threads System**: Run background tasks while keeping the UI responsive! Perfect for HTTP requests, file processing, and long-running operations.
 - **Advanced Layouts**: Absolute, vertical, horizontal, and smart margin/grid layouts for complex UIs.
 - **Scrollable Containers**: True scrollable containers with automatic scrollbars, strict clipping, and event handling.
 - **Event System**: Mouse, keyboard, scroll, drag, and focus events, with full propagation and focus management.
@@ -21,7 +21,6 @@ A modern, feature-rich, extensible UI framework for ComputerCraft and CC: Tweake
 - **Pixel Canvas**: Draw pixel-level graphics with the Canvas widget.
 - **Extensible**: Easily add your own widgets or extend existing ones.
 - **Demo Suite**: Includes a full-featured demo app showcasing every widget and feature.
-- **Cooperative Threading/Tasks**: Run background tasks or long-running code in parallel with the UI using the built-in thread system. Keep your UI responsive while doing work in the background!
 
 ---
 
@@ -74,77 +73,10 @@ container:addChild(PixelUI.label({ x = 2, y = 2, text = "Inside!" }))
 
 - Set `isScrollable = true` on a container. Add children as usual. If content exceeds the container, scrollbars appear and mouse wheel works.
 
-
 ### 5. **Event Handling**
 
 - All widgets support `onClick`, and many support `onChange`, `onSelect`, `onToggle`, etc.
 - Keyboard and mouse events are handled automatically by `PixelUI.run()`.
-
-
-### 5.5 **Background Tasks & Threading**
-
-PixelUI includes a built-in cooperative thread/task system, allowing you to run background code without freezing the UI. This is perfect for network requests, file I/O, or any long-running logic.
-
-**Important:**
-- Do **not** use `os.sleep()` in your threads! `os.sleep()` will freeze the entire UI and all threads. Instead, use `PixelUI.thread.sleep(seconds)` for non-blocking sleep.
-
-**API:**
-
-```lua
-local id = PixelUI.thread.new(function(...)
-  -- Your background code here
-  for i = 1, 10 do
-    print("Thread tick", i)
-    PixelUI.thread.sleep(1) -- This yields to the UI without freezing
-  end
-end)
-
--- You can start as many threads as you want, at any time.
--- Threads are automatically scheduled alongside the UI.
-
--- To stop a thread early:
-PixelUI.thread.stop(id)
-
--- To get the number of running threads:
-print(PixelUI.thread.count())
-```
-
-**Real-world Example: Non-blocking Progress Bar**
-
-```lua
-local PixelUI = require("pixelui")
-PixelUI.init()
-
-local statusLabel = PixelUI.label({
-  x = 2, y = 2, text = "Press the button to start a background task...",
-  color = colors.cyan,
-  width = 40
-})
-
-local progressBar = PixelUI.progressBar({
-  x = 2, y = 4, width = 30, progress = 0,
-  text = "Progress"
-})
-
-PixelUI.button({
-  x = 2, y = 6, text = "Start Background Task",
-  onClick = function()
-    statusLabel.text = "Task running in background..."
-    progressBar.progress = 0
-    PixelUI.thread.new(function()
-      for i = 1, 10 do
-        PixelUI.thread.sleep(0.5) -- Non-blocking sleep!
-        progressBar.progress = i * 10
-      end
-      statusLabel.text = "Task complete! UI never froze."
-    end)
-  end
-})
-
-PixelUI.run()
-```
-
-Threads are cooperative: they must yield (e.g. via `PixelUI.thread.sleep`, `coroutine.yield`, or waiting for events) to allow the UI to update. You can safely update widgets from a thread, but be careful with shared state.
 
 ### 6. **Animation**
 
@@ -893,6 +825,164 @@ PixelUI.animate(widget, {
 - Any widget with `draggable = true` can be dragged.
 - Use `onDragStart`, `onDragEnd`, and `onDrop` for custom logic.
 - Restrict drag area with `dragArea`.
+
+---
+
+## 🧵 Background Threads System (Advanced)
+
+PixelUI includes a powerful cooperative threading system that allows you to run background tasks while keeping your UI responsive. Perfect for HTTP requests, file operations, and long-running computations!
+
+### Quick Start
+
+```lua
+-- Spawn a simple background task
+PixelUI.spawnThread(function()
+    for i = 1, 100 do
+        print("Background task progress:", i)
+        PixelUI.sleep(0.1) -- Yield control back to UI
+    end
+end, "myTask")
+
+-- Run an async operation with automatic cleanup
+PixelUI.runAsync(function()
+    local response = http.get("https://api.example.com/data")
+    if response then
+        local data = response.readAll()
+        response.close()
+        -- Update UI with the data
+        myLabel:setText("Received: " .. #data .. " bytes")
+    end
+end)
+```
+
+### Thread Management Functions
+
+#### `PixelUI.spawnThread(func, name)`
+Creates and starts a new background thread.
+- `func`: The function to run in the background
+- `name`: Optional thread name for identification
+- Returns: Thread ID
+
+#### `PixelUI.killThread(threadId)`
+Stops and removes a running thread.
+- `threadId`: ID of thread to stop
+
+#### `PixelUI.runAsync(func, name)`
+Convenience function that spawns a thread with automatic error handling.
+- Shows toast notifications for errors
+- Automatically cleans up on completion
+
+#### `PixelUI.sleep(seconds)`
+Yields control back to the main UI loop for the specified time.
+- `seconds`: Time to sleep (can be fractional)
+- Must be called from within a thread
+
+### Thread System Features
+
+- **Cooperative Multitasking**: Threads yield control voluntarily, preventing UI freezing
+- **Automatic Cleanup**: Threads are automatically removed when they complete or error
+- **Error Handling**: Uncaught errors show toast notifications and don't crash the UI
+- **Thread Monitoring**: Get thread status and information
+- **Integration**: Works seamlessly with PixelUI's event system and animations
+
+### Real-World Examples
+
+#### HTTP API Calls
+```lua
+local function fetchUserData(userId)
+    PixelUI.runAsync(function()
+        loadingSpinner:show()
+        
+        local url = "https://api.example.com/users/" .. userId
+        local response = http.get(url)
+        
+        if response then
+            local userData = textutils.unserializeJSON(response.readAll())
+            response.close()
+            
+            -- Update UI on main thread
+            userNameLabel:setText(userData.name)
+            userEmailLabel:setText(userData.email)
+        else
+            PixelUI.showToast("Failed to fetch user data", "Error", "error")
+        end
+        
+        loadingSpinner:hide()
+    end, "fetchUser")
+end
+```
+
+#### File Processing
+```lua
+local function processLargeFile(filename)
+    PixelUI.spawnThread(function()
+        local file = fs.open(filename, "r")
+        if not file then return end
+        
+        local lineCount = 0
+        local progressBar = PixelUI.progressBar({x=10, y=10, width=20})
+        
+        while true do
+            local line = file.readLine()
+            if not line then break end
+            
+            lineCount = lineCount + 1
+            
+            -- Process the line here
+            processLine(line)
+            
+            -- Update progress every 100 lines
+            if lineCount % 100 == 0 then
+                progressBar:setProgress(lineCount / estimatedTotalLines)
+                PixelUI.sleep(0.01) -- Yield to keep UI responsive
+            end
+        end
+        
+        file.close()
+        PixelUI.showToast("Processed " .. lineCount .. " lines", "Complete", "success")
+    end, "fileProcessor")
+end
+```
+
+#### Background Monitoring
+```lua
+local function startSystemMonitor()
+    PixelUI.spawnThread(function()
+        while true do
+            -- Check system stats
+            local freeSpace = fs.getFreeSpace("/")
+            local energy = turtle and turtle.getFuelLevel() or 0
+            
+            -- Update UI indicators
+            diskSpaceLabel:setText("Free: " .. freeSpace .. " bytes")
+            if turtle then
+                fuelLabel:setText("Fuel: " .. energy)
+            end
+            
+            -- Check every 5 seconds
+            PixelUI.sleep(5)
+        end
+    end, "systemMonitor")
+end
+```
+
+### Best Practices
+
+1. **Always Yield**: Call `PixelUI.sleep()` in loops to prevent blocking the UI
+2. **Handle Errors**: Use `PixelUI.runAsync()` for automatic error handling
+3. **Clean Resources**: Close files, HTTP responses, and peripherals properly
+4. **Update UI Safely**: All UI updates should happen on the main thread
+5. **Use Meaningful Names**: Name your threads for easier debugging
+6. **Monitor Long Tasks**: Show progress indicators for lengthy operations
+
+### Thread Lifecycle
+
+1. **Creation**: Thread is created with `spawnThread()` or `runAsync()`
+2. **Execution**: Thread runs cooperatively, yielding with `sleep()`
+3. **Completion**: Thread ends naturally or via `killThread()`
+4. **Cleanup**: Thread is automatically removed from the thread manager
+
+The thread system integrates seamlessly with PixelUI's main event loop, ensuring your UI remains responsive while background tasks run efficiently.
 
 ---
 
