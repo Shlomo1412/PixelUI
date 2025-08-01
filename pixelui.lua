@@ -5903,20 +5903,20 @@ function PixelUI.run(userConfig)
     if userConfig and userConfig.onStart then userConfig.onStart() end
     
     while running do
-        -- Step through all background threads
-        ThreadManager:step()
-        
-        -- Update animations and toasts
-        animationFrame() -- update all animations
-        PixelUI.updateToasts() -- update toast notifications
-        
-        -- Render the UI
-        PixelUI.render()
-        
         -- Handle events
         local event, p1, p2, p3, p4, p5 = os.pullEvent()
         
         if event == "timer" and p1 == timerId then
+            -- Step through all background threads
+            ThreadManager:step()
+            
+            -- Update animations and toasts
+            animationFrame() -- update all animations
+            PixelUI.updateToasts() -- update toast notifications
+            
+            -- Render the UI
+            PixelUI.render()
+            
             timerId = os.startTimer(animationInterval)
         else
             PixelUI.handleEvent(event, p1, p2, p3, p4, p5)
