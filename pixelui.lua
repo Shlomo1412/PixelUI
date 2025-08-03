@@ -8027,6 +8027,7 @@ function PluginManager:loadPluginFromFile(filePath)
         term = term,
         fs = fs,
         os = os,
+        http = http,
         math = math,
         string = string,
         table = table,
@@ -8109,6 +8110,69 @@ function PluginManager:loadPluginsFromDirectory(dirPath)
     return loadedPlugins
 end
 
+function PluginManager:loadPluginFromURL(url, tempFileName)
+    -- Validate URL
+    if not url or type(url) ~= "string" then
+        error("URL must be a valid string")
+    end
+    
+    if not url:match("^https?://") then
+        error("URL must use http or https protocol")
+    end
+    
+    -- Generate temporary filename if not provided
+    if not tempFileName then
+        local urlPath = url:match("/([^/]+)$") or "plugin.lua"
+        tempFileName = "temp_" .. os.epoch("utc") .. "_" .. urlPath
+    end
+    
+    -- Ensure temp filename ends with .lua
+    if not tempFileName:match("%.lua$") then
+        tempFileName = tempFileName .. ".lua"
+    end
+    
+    local tempPath = fs.combine("temp", tempFileName)
+    
+    -- Create temp directory if it doesn't exist
+    if not fs.exists("temp") then
+        fs.makeDir("temp")
+    end
+    
+    -- Download the plugin using CC:Tweaked's http API
+    local response, err = http.get(url)
+    if not response then
+        error("Failed to download plugin from URL: " .. (err or "Unknown error"))
+    end
+    
+    local content = response.readAll()
+    response.close()
+    
+    if not content or content == "" then
+        error("Downloaded plugin file is empty")
+    end
+    
+    -- Save to temporary file
+    local file = fs.open(tempPath, "w")
+    file.write(content)
+    file.close()
+    
+    -- Load the plugin from the temporary file
+    local success, result = pcall(function()
+        return self:loadPluginFromFile(tempPath)
+    end)
+    
+    -- Clean up temporary file
+    if fs.exists(tempPath) then
+        fs.delete(tempPath)
+    end
+    
+    if not success then
+        error("Failed to load plugin from URL: " .. result)
+    end
+    
+    return result
+end
+
 -- Plugin information and management
 function PluginManager:listPlugins()
     local pluginList = {}
@@ -8171,6 +8235,10 @@ function PixelUI.loadPluginsFromDirectory(dirPath)
     return PluginManager:loadPluginsFromDirectory(dirPath)
 end
 
+function PixelUI.loadPluginFromURL(url, tempFileName)
+    return PluginManager:loadPluginFromURL(url, tempFileName)
+end
+
 function PixelUI.listPlugins()
     return PluginManager:listPlugins()
 end
@@ -8225,5 +8293,36 @@ end
 
 -- Export plugin manager for advanced usage
 PixelUI.PluginManager = PluginManager
+
+-- Convenience API for plugin operations
+PixelUI.plugins = {
+    loadFromURL = function(url, tempFileName)
+        return PixelUI.loadPluginFromURL(url, tempFileName)
+    end,
+    loadFromFile = function(filePath)
+        return PixelUI.loadPluginFromFile(filePath)
+    end,
+    loadFromDirectory = function(dirPath)
+        return PixelUI.loadPluginsFromDirectory(dirPath)
+    end,
+    list = function()
+        return PixelUI.listPlugins()
+    end,
+    enable = function(pluginId)
+        return PixelUI.enablePlugin(pluginId)
+    end,
+    disable = function(pluginId)
+        return PixelUI.disablePlugin(pluginId)
+    end,
+    get = function(pluginId)
+        return PixelUI.getPlugin(pluginId)
+    end,
+    isLoaded = function(pluginId)
+        return PixelUI.isPluginLoaded(pluginId)
+    end,
+    isEnabled = function(pluginId)
+        return PixelUI.isPluginEnabled(pluginId)
+    end
+}
 
 return PixelUI
