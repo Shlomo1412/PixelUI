@@ -10,7 +10,7 @@ PixelUI.init()
 -- Demo state and configuration
 local demo = {
     currentFrame = 1,
-    totalFrames = 31,  -- Updated to include Window and FilePicker demos
+    totalFrames = 36,  -- Updated to include new widgets: RichTextBox, CodeEditor, Accordion, Minimap, StatusBar
     frames = {
         {name = "Label", component = "label", 
          description = "Static text display widget with alignment and color options"},
@@ -73,7 +73,17 @@ local demo = {
         {name = "Window", component = "window",
          description = "Draggable window widget: moveable dialog with title bar and content area!"},
         {name = "FilePicker", component = "filePicker",
-         description = "Beautiful file picker dialog: navigate directories, select files with icons!"}
+         description = "Beautiful file picker dialog: navigate directories, select files with icons!"},
+        {name = "RichTextBox", component = "richTextBox",
+         description = "Multi-line text editor with line numbers, formatting, and advanced editing features"},
+        {name = "CodeEditor", component = "codeEditor",
+         description = "Syntax-highlighted code editor with auto-indent and language support"},
+        {name = "Accordion", component = "accordion",
+         description = "Collapsible sections container for organizing content in expandable panels"},
+        {name = "Minimap", component = "minimap",
+         description = "Content overview widget for navigation in large documents or interfaces"},
+        {name = "StatusBar", component = "statusBar",
+         description = "Status information display with multiple sections and alignment options"}
     },
     -- Component-specific state
     state = {
@@ -198,7 +208,46 @@ local demo = {
         -- FilePicker demo state
         filePickerVisible = false,
         selectedFilePath = "No file selected",
-        filePickerMode = "open"
+        filePickerMode = "open",
+        
+        -- RichTextBox demo state
+        richTextContent = "Welcome to PixelUI RichTextBox!\n\nThis is a multi-line text editor with:\n• Line numbers\n• Text formatting support\n• Selection capabilities\n• Scroll support for long content\n\nTry editing this text!",
+        richTextLineNumbers = true,
+        richTextWordWrap = true,
+        
+        -- CodeEditor demo state
+        codeContent = "-- Lua Code Example\nfunction greet(name)\n    local message = \"Hello, \" .. name .. \"!\"\n    print(message)\n    return message\nend\n\n-- Usage\ngreet(\"PixelUI\")\n\nfor i = 1, 5 do\n    print(\"Count: \" .. i)\nend",
+        codeLanguage = "lua",
+        codeAutoIndent = true,
+        
+        -- Accordion demo state
+        accordionSections = {
+            {title = "Personal Information", expanded = true, content = "Name: John Doe\nAge: 30\nLocation: City"},
+            {title = "Contact Details", expanded = false, content = "Email: john@example.com\nPhone: +1234567890"},
+            {title = "Preferences", expanded = false, content = "Theme: Dark\nLanguage: English\nNotifications: Enabled"},
+            {title = "Advanced Settings", expanded = false, content = "Debug Mode: Off\nLogging: Enabled\nCache Size: 100MB"}
+        },
+        accordionMode = "single",
+        
+        -- Minimap demo state
+        minimapContent = (function()
+            local content = {}
+            for i = 1, 50 do
+                table.insert(content, "Line " .. i .. ": This is sample content for the minimap demonstration")
+            end
+            return content
+        end)(),
+        minimapViewport = {top = 1, height = 8},
+        minimapZoom = 1.0,
+        
+        -- StatusBar demo state
+        statusBarMode = "left",
+        statusBarTime = os.date("%H:%M:%S"),
+        statusBarSections = {
+            left = {"Ready", "Status: OK"},
+            center = {"PixelUI Demo"},
+            right = {"Line 1:1", "Time: " .. os.date("%H:%M:%S")}
+        }
     }
 }
 
@@ -356,6 +405,16 @@ function demo:createComponentDemo(component)
         self:createWindowDemo()
     elseif component == "filePicker" then
         self:createFilePickerDemo()
+    elseif component == "richTextBox" then
+        self:createRichTextBoxDemo()
+    elseif component == "codeEditor" then
+        self:createCodeEditorDemo()
+    elseif component == "accordion" then
+        self:createAccordionDemo()
+    elseif component == "minimap" then
+        self:createMinimapDemo()
+    elseif component == "statusBar" then
+        self:createStatusBarDemo()
     end
 end
 
@@ -3417,6 +3476,469 @@ function demo:createFilePickerDemo()
         x = 2, y = 24,
         text = "Instructions: Click 'Open File Picker' to show the dialog",
         color = colors.lightBlue
+    })
+end
+
+-- RichTextBox demonstration
+function demo:createRichTextBoxDemo()
+    PixelUI.label({
+        x = 2, y = 6,
+        text = "RichTextBox - Multi-line Text Editor:",
+        color = colors.white
+    })
+    
+    -- Add some initial state for the rich text box if not present
+    if not self.state.richTextContent then
+        self.state.richTextContent = "Welcome to PixelUI RichTextBox!\n\nThis is a multi-line text editor with:\n• Line numbers\n• Text formatting support\n• Selection capabilities\n• Scroll support for long content\n\nTry editing this text!"
+        self.state.richTextLineNumbers = true
+        self.state.richTextWordWrap = true
+    end
+    
+    PixelUI.richTextBox({
+        x = 2, y = 8,
+        width = 45,
+        height = 8,
+        text = self.state.richTextContent,
+        showLineNumbers = self.state.richTextLineNumbers,
+        wordWrap = self.state.richTextWordWrap,
+        color = colors.white,
+        background = colors.black,
+        onChange = function(textbox, text)
+            demo.state.richTextContent = text
+        end
+    })
+    
+    -- Control buttons
+    PixelUI.button({
+        x = 2, y = 17,
+        text = self.state.richTextLineNumbers and "Hide Lines" or "Show Lines",
+        background = colors.blue,
+        color = colors.white,
+        width = 12,
+        height = 1,
+        onClick = function()
+            self.state.richTextLineNumbers = not self.state.richTextLineNumbers
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 16, y = 17,
+        text = self.state.richTextWordWrap and "No Wrap" or "Word Wrap",
+        background = colors.green,
+        color = colors.white,
+        width = 12,
+        height = 1,
+        onClick = function()
+            self.state.richTextWordWrap = not self.state.richTextWordWrap
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 30, y = 17,
+        text = "Clear Text",
+        background = colors.red,
+        color = colors.white,
+        width = 12,
+        height = 1,
+        onClick = function()
+            self.state.richTextContent = ""
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.label({
+        x = 2, y = 19,
+        text = "Lines: " .. (self.state.richTextContent:match("\n") and #self.state.richTextContent:gsub("[^\n]","") + 1 or 1) .. " | Characters: " .. #self.state.richTextContent,
+        color = colors.lightGray
+    })
+end
+
+-- CodeEditor demonstration
+function demo:createCodeEditorDemo()
+    PixelUI.label({
+        x = 2, y = 6,
+        text = "CodeEditor - Syntax Highlighted Editor:",
+        color = colors.white
+    })
+    
+    -- Add some initial state for the code editor if not present
+    if not self.state.codeContent then
+        self.state.codeContent = "-- Lua Code Example\nfunction greet(name)\n    local message = \"Hello, \" .. name .. \"!\"\n    print(message)\n    return message\nend\n\n-- Usage\ngreet(\"PixelUI\")\n\nfor i = 1, 5 do\n    print(\"Count: \" .. i)\nend"
+        self.state.codeLanguage = "lua"
+        self.state.codeAutoIndent = true
+    end
+    
+    PixelUI.codeEditor({
+        x = 2, y = 8,
+        width = 45,
+        height = 8,
+        text = self.state.codeContent,
+        language = self.state.codeLanguage,
+        autoIndent = self.state.codeAutoIndent,
+        showLineNumbers = true,
+        color = colors.white,
+        background = colors.black,
+        onChange = function(editor, text)
+            demo.state.codeContent = text
+        end
+    })
+    
+    -- Language selection buttons
+    PixelUI.label({
+        x = 2, y = 17,
+        text = "Language:",
+        color = colors.white
+    })
+    
+    PixelUI.button({
+        x = 12, y = 17,
+        text = "Lua",
+        background = self.state.codeLanguage == "lua" and colors.blue or colors.gray,
+        color = colors.white,
+        width = 6,
+        height = 1,
+        onClick = function()
+            self.state.codeLanguage = "lua"
+            self.state.codeContent = "-- Lua Code Example\nfunction greet(name)\n    local message = \"Hello, \" .. name .. \"!\"\n    print(message)\nend\n\ngreet(\"PixelUI\")"
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 20, y = 17,
+        text = "JS",
+        background = self.state.codeLanguage == "javascript" and colors.blue or colors.gray,
+        color = colors.white,
+        width = 6,
+        height = 1,
+        onClick = function()
+            self.state.codeLanguage = "javascript"
+            self.state.codeContent = "// JavaScript Example\nfunction greet(name) {\n    const message = `Hello, ${name}!`;\n    console.log(message);\n    return message;\n}\n\ngreet('PixelUI');"
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 28, y = 17,
+        text = "Python",
+        background = self.state.codeLanguage == "python" and colors.blue or colors.gray,
+        color = colors.white,
+        width = 8,
+        height = 1,
+        onClick = function()
+            self.state.codeLanguage = "python"
+            self.state.codeContent = "# Python Example\ndef greet(name):\n    message = f\"Hello, {name}!\"\n    print(message)\n    return message\n\ngreet('PixelUI')\n\nfor i in range(1, 6):\n    print(f\"Count: {i}\")"
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 38, y = 17,
+        text = self.state.codeAutoIndent and "Auto-Indent ON" or "Auto-Indent OFF",
+        background = colors.green,
+        color = colors.white,
+        width = 14,
+        height = 1,
+        onClick = function()
+            self.state.codeAutoIndent = not self.state.codeAutoIndent
+            self:refreshFrame()
+        end
+    })
+end
+
+-- Accordion demonstration
+function demo:createAccordionDemo()
+    PixelUI.label({
+        x = 2, y = 6,
+        text = "Accordion - Collapsible Sections:",
+        color = colors.white
+    })
+    
+    -- Add some initial state for the accordion if not present
+    if not self.state.accordionSections then
+        self.state.accordionSections = {
+            {title = "Personal Information", expanded = true, content = "Name: John Doe\nAge: 30\nLocation: City"},
+            {title = "Contact Details", expanded = false, content = "Email: john@example.com\nPhone: +1234567890"},
+            {title = "Preferences", expanded = false, content = "Theme: Dark\nLanguage: English\nNotifications: Enabled"},
+            {title = "Advanced Settings", expanded = false, content = "Debug Mode: Off\nLogging: Enabled\nCache Size: 100MB"}
+        }
+        self.state.accordionMode = "single" -- single or multiple
+    end
+    
+    PixelUI.accordion({
+        x = 2, y = 8,
+        width = 45,
+        height = 10,
+        sections = self.state.accordionSections,
+        mode = self.state.accordionMode,
+        onToggle = function(accordion, sectionIndex, expanded)
+            demo.state.accordionSections[sectionIndex].expanded = expanded
+            demo:refreshFrame()
+        end
+    })
+    
+    -- Mode toggle button
+    PixelUI.button({
+        x = 2, y = 19,
+        text = "Mode: " .. (self.state.accordionMode == "single" and "Single" or "Multiple"),
+        background = colors.blue,
+        color = colors.white,
+        width = 16,
+        height = 1,
+        onClick = function()
+            self.state.accordionMode = self.state.accordionMode == "single" and "multiple" or "single"
+            if self.state.accordionMode == "single" then
+                -- Close all but first section in single mode
+                for i = 2, #self.state.accordionSections do
+                    self.state.accordionSections[i].expanded = false
+                end
+            end
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 20, y = 19,
+        text = "Expand All",
+        background = colors.green,
+        color = colors.white,
+        width = 12,
+        height = 1,
+        onClick = function()
+            for i = 1, #self.state.accordionSections do
+                self.state.accordionSections[i].expanded = true
+            end
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 34, y = 19,
+        text = "Collapse All",
+        background = colors.red,
+        color = colors.white,
+        width = 14,
+        height = 1,
+        onClick = function()
+            for i = 1, #self.state.accordionSections do
+                self.state.accordionSections[i].expanded = false
+            end
+            self:refreshFrame()
+        end
+    })
+end
+
+-- Minimap demonstration
+function demo:createMinimapDemo()
+    PixelUI.label({
+        x = 2, y = 6,
+        text = "Minimap - Content Overview:",
+        color = colors.white
+    })
+    
+    -- Add some initial state for the minimap if not present
+    if not self.state.minimapContent then
+        self.state.minimapContent = {}
+        -- Generate some sample content
+        for i = 1, 50 do
+            table.insert(self.state.minimapContent, "Line " .. i .. ": This is sample content for the minimap demonstration")
+        end
+        self.state.minimapViewport = {top = 1, height = 8}
+        self.state.minimapZoom = 1.0
+    end
+    
+    -- Main content area (simulated)
+    PixelUI.label({
+        x = 2, y = 8,
+        text = "Main Content Area (showing lines " .. self.state.minimapViewport.top .. "-" .. (self.state.minimapViewport.top + self.state.minimapViewport.height - 1) .. "):",
+        color = colors.lightGray
+    })
+    
+    -- Show a portion of the content
+    for i = 1, self.state.minimapViewport.height do
+        local lineIndex = self.state.minimapViewport.top + i - 1
+        if lineIndex <= #self.state.minimapContent then
+            PixelUI.label({
+                x = 2, y = 8 + i,
+                text = string.sub(self.state.minimapContent[lineIndex], 1, 30) .. "...",
+                color = colors.white
+            })
+        end
+    end
+    
+    -- Minimap widget
+    PixelUI.minimap({
+        x = 35, y = 8,
+        width = 15,
+        height = 8,
+        content = self.state.minimapContent,
+        viewport = self.state.minimapViewport,
+        zoom = self.state.minimapZoom,
+        onViewportChange = function(minimap, newViewport)
+            demo.state.minimapViewport = newViewport
+            demo:refreshFrame()
+        end
+    })
+    
+    -- Control buttons
+    PixelUI.button({
+        x = 2, y = 18,
+        text = "Scroll Up",
+        background = colors.blue,
+        color = colors.white,
+        width = 10,
+        height = 1,
+        onClick = function()
+            if self.state.minimapViewport.top > 1 then
+                self.state.minimapViewport.top = self.state.minimapViewport.top - 3
+                self:refreshFrame()
+            end
+        end
+    })
+    
+    PixelUI.button({
+        x = 14, y = 18,
+        text = "Scroll Down",
+        background = colors.blue,
+        color = colors.white,
+        width = 12,
+        height = 1,
+        onClick = function()
+            if self.state.minimapViewport.top < #self.state.minimapContent - self.state.minimapViewport.height then
+                self.state.minimapViewport.top = self.state.minimapViewport.top + 3
+                self:refreshFrame()
+            end
+        end
+    })
+    
+    PixelUI.button({
+        x = 28, y = 18,
+        text = "Zoom: " .. string.format("%.1f", self.state.minimapZoom) .. "x",
+        background = colors.green,
+        color = colors.white,
+        width = 12,
+        height = 1,
+        onClick = function()
+            self.state.minimapZoom = self.state.minimapZoom == 1.0 and 0.5 or (self.state.minimapZoom == 0.5 and 2.0 or 1.0)
+            self:refreshFrame()
+        end
+    })
+end
+
+-- StatusBar demonstration
+function demo:createStatusBarDemo()
+    PixelUI.label({
+        x = 2, y = 6,
+        text = "StatusBar - Status Information Display:",
+        color = colors.white
+    })
+    
+    -- Add some initial state for the status bar if not present
+    if not self.state.statusBarMode then
+        self.state.statusBarMode = "left"
+        self.state.statusBarTime = os.date("%H:%M:%S")
+        self.state.statusBarSections = {
+            left = {"Ready", "Status: OK"},
+            center = {"PixelUI Demo"},
+            right = {"Line 1:1", "Time: " .. os.date("%H:%M:%S")}
+        }
+    end
+    
+    PixelUI.label({
+        x = 2, y = 8,
+        text = "Left-aligned StatusBar:",
+        color = colors.lightGray
+    })
+    
+    PixelUI.statusBar({
+        x = 2, y = 9,
+        width = 45,
+        sections = self.state.statusBarSections.left,
+        alignment = "left",
+        color = colors.white,
+        background = colors.gray
+    })
+    
+    PixelUI.label({
+        x = 2, y = 11,
+        text = "Center-aligned StatusBar:",
+        color = colors.lightGray
+    })
+    
+    PixelUI.statusBar({
+        x = 2, y = 12,
+        width = 45,
+        sections = self.state.statusBarSections.center,
+        alignment = "center",
+        color = colors.white,
+        background = colors.blue
+    })
+    
+    PixelUI.label({
+        x = 2, y = 14,
+        text = "Right-aligned StatusBar:",
+        color = colors.lightGray
+    })
+    
+    PixelUI.statusBar({
+        x = 2, y = 15,
+        width = 45,
+        sections = self.state.statusBarSections.right,
+        alignment = "right",
+        color = colors.white,
+        background = colors.green
+    })
+    
+    -- Update time button
+    PixelUI.button({
+        x = 2, y = 17,
+        text = "Update Time",
+        background = colors.orange,
+        color = colors.white,
+        width = 12,
+        height = 1,
+        onClick = function()
+            local newTime = os.date("%H:%M:%S")
+            self.state.statusBarSections.right[2] = "Time: " .. newTime
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 16, y = 17,
+        text = "Toggle Status",
+        background = colors.purple,
+        color = colors.white,
+        width = 14,
+        height = 1,
+        onClick = function()
+            local statuses = {"Status: OK", "Status: Warning", "Status: Error", "Status: Loading"}
+            local currentIndex = 1
+            for i, status in ipairs(statuses) do
+                if self.state.statusBarSections.left[2] == status then
+                    currentIndex = i
+                    break
+                end
+            end
+            local nextIndex = (currentIndex % #statuses) + 1
+            self.state.statusBarSections.left[2] = statuses[nextIndex]
+            self:refreshFrame()
+        end
+    })
+    
+    PixelUI.button({
+        x = 32, y = 17,
+        text = "Add Section",
+        background = colors.cyan,
+        color = colors.white,
+        width = 12,
+        height = 1,
+        onClick = function()
+            table.insert(self.state.statusBarSections.left, "Section " .. (#self.state.statusBarSections.left + 1))
+            self:refreshFrame()
+        end
     })
 end
 

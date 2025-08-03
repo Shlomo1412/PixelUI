@@ -609,6 +609,16 @@ function Widget:render()
     -- Override in subclasses
 end
 
+function Widget:setFocus()
+    setFocusedWidget(self)
+end
+
+function Widget:clearFocus()
+    if focusedWidget == self then
+        setFocusedWidget(nil)
+    end
+end
+
 -- Label Widget
 local Label = setmetatable({}, {__index = Widget})
 Label.__index = Label
@@ -5361,6 +5371,943 @@ function MsgBox:close(result)
     end
 end
 
+-- RichTextBox Widget (Multi-line text editing with formatting)
+local RichTextBox = setmetatable({}, {__index = Widget})
+RichTextBox.__index = RichTextBox
+
+function RichTextBox:new(props)
+    local richtext = Widget.new(self, props)
+    richtext.lines = props.lines or {""}
+    richtext.cursorX = props.cursorX or 1
+    richtext.cursorY = props.cursorY or 1
+    richtext.scrollX = 0
+    richtext.scrollY = 0
+    richtext.maxLines = props.maxLines or 1000
+    richtext.wordWrap = props.wordWrap ~= false
+    richtext.showLineNumbers = props.showLineNumbers or false
+    richtext.tabSize = props.tabSize or 4
+    richtext.onChange = props.onChange
+    richtext.onCursorMove = props.onCursorMove
+    richtext.readonly = props.readonly or false
+    
+    -- Formatting support
+    richtext.formatting = props.formatting or {}
+    richtext.allowFormatting = props.allowFormatting or false
+    richtext.formatCodes = {
+        ["&0"] = colors.white, ["&1"] = colors.orange, ["&2"] = colors.magenta,
+        ["&3"] = colors.lightBlue, ["&4"] = colors.yellow, ["&5"] = colors.lime,
+        ["&6"] = colors.pink, ["&7"] = colors.gray, ["&8"] = colors.lightGray,
+        ["&9"] = colors.cyan, ["&a"] = colors.purple, ["&b"] = colors.blue,
+        ["&c"] = colors.brown, ["&d"] = colors.green, ["&e"] = colors.red,
+        ["&f"] = colors.black
+    }
+    
+    -- Selection
+    richtext.hasSelection = false
+    richtext.selStartX = 1
+    richtext.selStartY = 1
+    richtext.selEndX = 1
+    richtext.selEndY = 1
+    
+    return richtext
+end
+
+function RichTextBox:render()
+    if not self.visible then return end
+    
+    local absX, absY = self:getAbsolutePos()
+    local theme = currentTheme
+    
+    -- Draw background
+    term.setBackgroundColor(self.background or theme.textbox.background or colors.black)
+    for i = 0, self.height - 1 do
+        term.setCursorPos(absX, absY + i)
+        term.write(string.rep(" ", self.width))
+    end
+    
+    -- Draw border if enabled
+    if self.border then
+        drawCharBorder(absX, absY, self.width, self.height, self.borderColor or theme.border or colors.gray, self.background or theme.textbox.background or colors.black)
+    end
+    
+    -- Calculate content area
+    local contentX = absX + (self.border and 1 or 0) + (self.showLineNumbers and 4 or 0)
+    local contentY = absY + (self.border and 1 or 0)
+    local contentWidth = self.width - (self.border and 2 or 0) - (self.showLineNumbers and 4 or 0)
+    local contentHeight = self.height - (self.border and 2 or 0)
+    
+    -- Draw line numbers if enabled
+    if self.showLineNumbers then
+        term.setBackgroundColor(theme.surface or colors.gray)
+        term.setTextColor(theme.textSecondary or colors.lightGray)
+        for i = 1, contentHeight do
+            local lineNum = i + self.scrollY
+            term.setCursorPos(absX + (self.border and 1 or 0), contentY + i - 1)
+            if lineNum <= #self.lines then
+                local numStr = tostring(lineNum)
+                term.write(string.rep(" ", 3 - #numStr) .. numStr)
+            else
+                term.write("   ")
+            end
+        end
+    end
+    
+    -- Draw text content
+    term.setBackgroundColor(self.background or theme.textbox.background or colors.black)
+    term.setTextColor(self.color or theme.text or colors.white)
+    
+    for i = 1, contentHeight do
+        local lineIndex = i + self.scrollY
+        term.setCursorPos(contentX, contentY + i - 1)
+        
+        if lineIndex <= #self.lines then
+            local line = self.lines[lineIndex] or ""
+            local displayLine = line:sub(self.scrollX + 1, self.scrollX + contentWidth)
+            
+            if self.allowFormatting then
+                self:renderFormattedLine(displayLine, contentX, contentY + i - 1)
+            else
+                term.write(displayLine .. string.rep(" ", math.max(0, contentWidth - #displayLine)))
+            end
+        else
+            term.write(string.rep(" ", contentWidth))
+        end
+    end
+    
+    -- Draw cursor if focused
+    if self.focused and not self.readonly then
+        local cursorScreenX = contentX + self.cursorX - self.scrollX - 1
+        local cursorScreenY = contentY + self.cursorY - self.scrollY - 1
+        
+        if cursorScreenX >= contentX and cursorScreenX < contentX + contentWidth and
+           cursorScreenY >= contentY and cursorScreenY < contentY + contentHeight then
+            term.setCursorPos(cursorScreenX, cursorScreenY)
+            term.setBackgroundColor(self.color or theme.text or colors.white)
+            term.setTextColor(self.background or theme.textbox.background or colors.black)
+            
+            local currentLine = self.lines[self.cursorY] or ""
+            local cursorChar = currentLine:sub(self.cursorX, self.cursorX)
+            term.write(cursorChar ~= "" and cursorChar or " ")
+        end
+    end
+    
+    term.setBackgroundColor(colors.black)
+end
+
+function RichTextBox:renderFormattedLine(line, x, y)
+    local currentX = x
+    local currentColor = self.color or colors.white
+    local i = 1
+    
+    while i <= #line do
+        local char = line:sub(i, i)
+        
+        if char == "&" and i < #line then
+            local formatCode = line:sub(i, i + 1)
+            if self.formatCodes[formatCode] then
+                currentColor = self.formatCodes[formatCode]
+                term.setTextColor(currentColor)
+                i = i + 2
+                goto continue
+            end
+        end
+        
+        term.setCursorPos(currentX, y)
+        term.write(char)
+        currentX = currentX + 1
+        i = i + 1
+        
+        ::continue::
+    end
+end
+
+function RichTextBox:insertText(text)
+    if self.readonly then return end
+    
+    local currentLine = self.lines[self.cursorY] or ""
+    local before = currentLine:sub(1, self.cursorX - 1)
+    local after = currentLine:sub(self.cursorX)
+    
+    -- Handle newlines
+    if text:find("\n") then
+        local lines = {}
+        for line in text:gmatch("[^\n]*") do
+            table.insert(lines, line)
+        end
+        
+        self.lines[self.cursorY] = before .. lines[1]
+        for i = 2, #lines do
+            table.insert(self.lines, self.cursorY + i - 1, lines[i] .. (i == #lines and after or ""))
+        end
+        
+        self.cursorY = self.cursorY + #lines - 1
+        self.cursorX = #lines[#lines] + (before ~= "" and #before or 0) + 1
+    else
+        self.lines[self.cursorY] = before .. text .. after
+        self.cursorX = self.cursorX + #text
+    end
+    
+    self:ensureCursorVisible()
+    if self.onChange then
+        self:onChange(self.lines, self.cursorX, self.cursorY)
+    end
+end
+
+function RichTextBox:ensureCursorVisible()
+    local contentWidth = self.width - (self.border and 2 or 0) - (self.showLineNumbers and 4 or 0)
+    local contentHeight = self.height - (self.border and 2 or 0)
+    
+    -- Horizontal scrolling
+    if self.cursorX <= self.scrollX then
+        self.scrollX = math.max(0, self.cursorX - 1)
+    elseif self.cursorX > self.scrollX + contentWidth then
+        self.scrollX = self.cursorX - contentWidth
+    end
+    
+    -- Vertical scrolling
+    if self.cursorY <= self.scrollY then
+        self.scrollY = math.max(0, self.cursorY - 1)
+    elseif self.cursorY > self.scrollY + contentHeight then
+        self.scrollY = self.cursorY - contentHeight
+    end
+end
+
+function RichTextBox:onClick(relX, relY)
+    if not self.enabled then return false end
+    
+    self:setFocus()
+    
+    local contentX = (self.border and 1 or 0) + (self.showLineNumbers and 4 or 0)
+    local contentY = (self.border and 1 or 0)
+    
+    if relX > contentX and relY > contentY then
+        local clickX = relX - contentX + self.scrollX
+        local clickY = relY - contentY + self.scrollY
+        
+        if clickY >= 1 and clickY <= #self.lines then
+            self.cursorY = clickY
+            local line = self.lines[clickY] or ""
+            self.cursorX = math.min(clickX, #line + 1)
+            
+            if self.onCursorMove then
+                self:onCursorMove(self.cursorX, self.cursorY)
+            end
+        end
+    end
+    
+    return true
+end
+
+function RichTextBox:handleKey(key)
+    if not self.enabled or not self.focused or self.readonly then return false end
+    
+    if key == keys.up then
+        if self.cursorY > 1 then
+            self.cursorY = self.cursorY - 1
+            local line = self.lines[self.cursorY] or ""
+            self.cursorX = math.min(self.cursorX, #line + 1)
+            self:ensureCursorVisible()
+        end
+        return true
+    elseif key == keys.down then
+        if self.cursorY < #self.lines then
+            self.cursorY = self.cursorY + 1
+            local line = self.lines[self.cursorY] or ""
+            self.cursorX = math.min(self.cursorX, #line + 1)
+            self:ensureCursorVisible()
+        end
+        return true
+    elseif key == keys.left then
+        if self.cursorX > 1 then
+            self.cursorX = self.cursorX - 1
+            self:ensureCursorVisible()
+        elseif self.cursorY > 1 then
+            self.cursorY = self.cursorY - 1
+            local line = self.lines[self.cursorY] or ""
+            self.cursorX = #line + 1
+            self:ensureCursorVisible()
+        end
+        return true
+    elseif key == keys.right then
+        local line = self.lines[self.cursorY] or ""
+        if self.cursorX <= #line then
+            self.cursorX = self.cursorX + 1
+            self:ensureCursorVisible()
+        elseif self.cursorY < #self.lines then
+            self.cursorY = self.cursorY + 1
+            self.cursorX = 1
+            self:ensureCursorVisible()
+        end
+        return true
+    elseif key == keys.enter then
+        self:insertText("\n")
+        return true
+    elseif key == keys.backspace then
+        if self.cursorX > 1 then
+            local line = self.lines[self.cursorY] or ""
+            self.lines[self.cursorY] = line:sub(1, self.cursorX - 2) .. line:sub(self.cursorX)
+            self.cursorX = self.cursorX - 1
+        elseif self.cursorY > 1 then
+            local currentLine = self.lines[self.cursorY] or ""
+            local prevLine = self.lines[self.cursorY - 1] or ""
+            self.lines[self.cursorY - 1] = prevLine .. currentLine
+            table.remove(self.lines, self.cursorY)
+            self.cursorY = self.cursorY - 1
+            self.cursorX = #prevLine + 1
+        end
+        self:ensureCursorVisible()
+        if self.onChange then
+            self:onChange(self.lines, self.cursorX, self.cursorY)
+        end
+        return true
+    elseif key == keys.tab then
+        self:insertText(string.rep(" ", self.tabSize))
+        return true
+    end
+    
+    return false
+end
+
+function RichTextBox:handleChar(char)
+    if not self.enabled or not self.focused or self.readonly then return false end
+    
+    self:insertText(char)
+    return true
+end
+
+function RichTextBox:getText()
+    return table.concat(self.lines, "\n")
+end
+
+function RichTextBox:setText(text)
+    self.lines = {}
+    for line in text:gmatch("[^\n]*") do
+        table.insert(self.lines, line)
+    end
+    if #self.lines == 0 then
+        self.lines = {""}
+    end
+    self.cursorX = 1
+    self.cursorY = 1
+    self.scrollX = 0
+    self.scrollY = 0
+end
+
+-- CodeEditor Widget (Syntax-highlighted code editing)
+local CodeEditor = setmetatable({}, {__index = RichTextBox})
+CodeEditor.__index = CodeEditor
+
+function CodeEditor:new(props)
+    local editor = RichTextBox.new(self, props)
+    editor.language = props.language or "lua"
+    editor.showLineNumbers = true
+    editor.syntaxHighlight = props.syntaxHighlight ~= false
+    editor.autoIndent = props.autoIndent ~= false
+    editor.matchBrackets = props.matchBrackets ~= false
+    
+    -- Lua syntax highlighting
+    editor.keywords = {
+        ["and"] = true, ["break"] = true, ["do"] = true, ["else"] = true,
+        ["elseif"] = true, ["end"] = true, ["false"] = true, ["for"] = true,
+        ["function"] = true, ["if"] = true, ["in"] = true, ["local"] = true,
+        ["nil"] = true, ["not"] = true, ["or"] = true, ["repeat"] = true,
+        ["return"] = true, ["then"] = true, ["true"] = true, ["until"] = true,
+        ["while"] = true
+    }
+    
+    return editor
+end
+
+function CodeEditor:render()
+    -- Use parent render but with syntax highlighting
+    if not self.visible then return end
+    
+    local absX, absY = self:getAbsolutePos()
+    local theme = currentTheme
+    
+    -- Draw background
+    term.setBackgroundColor(colors.black)
+    for i = 0, self.height - 1 do
+        term.setCursorPos(absX, absY + i)
+        term.write(string.rep(" ", self.width))
+    end
+    
+    -- Draw border
+    if self.border then
+        drawCharBorder(absX, absY, self.width, self.height, colors.gray, colors.black)
+    end
+    
+    -- Calculate content area
+    local contentX = absX + (self.border and 1 or 0) + 4 -- Always show line numbers
+    local contentY = absY + (self.border and 1 or 0)
+    local contentWidth = self.width - (self.border and 2 or 0) - 4
+    local contentHeight = self.height - (self.border and 2 or 0)
+    
+    -- Draw line numbers
+    term.setBackgroundColor(colors.gray)
+    term.setTextColor(colors.lightGray)
+    for i = 1, contentHeight do
+        local lineNum = i + self.scrollY
+        term.setCursorPos(absX + (self.border and 1 or 0), contentY + i - 1)
+        if lineNum <= #self.lines then
+            local numStr = tostring(lineNum)
+            term.write(string.rep(" ", 3 - #numStr) .. numStr)
+        else
+            term.write("   ")
+        end
+    end
+    
+    -- Draw code with syntax highlighting
+    for i = 1, contentHeight do
+        local lineIndex = i + self.scrollY
+        if lineIndex <= #self.lines then
+            local line = self.lines[lineIndex] or ""
+            local displayLine = line:sub(self.scrollX + 1, self.scrollX + contentWidth)
+            self:renderSyntaxHighlightedLine(displayLine, contentX, contentY + i - 1)
+        end
+    end
+    
+    -- Draw cursor
+    if self.focused and not self.readonly then
+        local cursorScreenX = contentX + self.cursorX - self.scrollX - 1
+        local cursorScreenY = contentY + self.cursorY - self.scrollY - 1
+        
+        if cursorScreenX >= contentX and cursorScreenX < contentX + contentWidth and
+           cursorScreenY >= contentY and cursorScreenY < contentY + contentHeight then
+            term.setCursorPos(cursorScreenX, cursorScreenY)
+            term.setBackgroundColor(colors.white)
+            term.setTextColor(colors.black)
+            
+            local currentLine = self.lines[self.cursorY] or ""
+            local cursorChar = currentLine:sub(self.cursorX, self.cursorX)
+            term.write(cursorChar ~= "" and cursorChar or " ")
+        end
+    end
+    
+    term.setBackgroundColor(colors.black)
+end
+
+function CodeEditor:renderSyntaxHighlightedLine(line, x, y)
+    term.setCursorPos(x, y)
+    term.setBackgroundColor(colors.black)
+    
+    if not self.syntaxHighlight then
+        term.setTextColor(colors.white)
+        term.write(line)
+        return
+    end
+    
+    -- Simple Lua syntax highlighting
+    local i = 1
+    while i <= #line do
+        local char = line:sub(i, i)
+        
+        -- Comments
+        if line:sub(i, i + 1) == "--" then
+            term.setTextColor(colors.green)
+            term.write(line:sub(i))
+            break
+        end
+        
+        -- Strings
+        if char == '"' or char == "'" then
+            local quote = char
+            term.setTextColor(colors.yellow)
+            term.write(char)
+            i = i + 1
+            
+            while i <= #line do
+                char = line:sub(i, i)
+                term.write(char)
+                if char == quote then
+                    i = i + 1
+                    break
+                end
+                i = i + 1
+            end
+            goto continue
+        end
+        
+        -- Numbers
+        if char:match("%d") then
+            term.setTextColor(colors.cyan)
+            while i <= #line and line:sub(i, i):match("[%d%.]") do
+                term.write(line:sub(i, i))
+                i = i + 1
+            end
+            goto continue
+        end
+        
+        -- Keywords and identifiers
+        if char:match("[%a_]") then
+            local word = ""
+            local startI = i
+            while i <= #line and line:sub(i, i):match("[%w_]") do
+                word = word .. line:sub(i, i)
+                i = i + 1
+            end
+            
+            if self.keywords[word] then
+                term.setTextColor(colors.purple)
+            else
+                term.setTextColor(colors.white)
+            end
+            
+            term.write(word)
+            goto continue
+        end
+        
+        -- Default color for symbols
+        term.setTextColor(colors.lightGray)
+        term.write(char)
+        i = i + 1
+        
+        ::continue::
+    end
+end
+
+-- Accordion Widget (Collapsible sections)
+local Accordion = setmetatable({}, {__index = Widget})
+Accordion.__index = Accordion
+
+function Accordion:new(props)
+    local accordion = Widget.new(self, props)
+    accordion.sections = props.sections or {}
+    accordion.allowMultiple = props.allowMultiple or false
+    accordion.expandedSections = props.expandedSections or {}
+    accordion.sectionHeight = props.sectionHeight or 1
+    accordion.headerHeight = props.headerHeight or 1
+    accordion.onSectionToggle = props.onSectionToggle
+    accordion.headerColor = props.headerColor or colors.white
+    accordion.headerBackground = props.headerBackground or colors.gray
+    accordion.contentColor = props.contentColor or colors.white
+    accordion.contentBackground = props.contentBackground or colors.black
+    accordion.borderColor = props.borderColor or colors.lightGray
+    
+    -- Initialize first section as expanded if none specified
+    if #accordion.expandedSections == 0 and #accordion.sections > 0 then
+        accordion.expandedSections[1] = true
+    end
+    
+    return accordion
+end
+
+function Accordion:render()
+    if not self.visible then return end
+    
+    local absX, absY = self:getAbsolutePos()
+    local currentY = absY
+    
+    for i, section in ipairs(self.sections) do
+        local isExpanded = self.expandedSections[i]
+        
+        -- Draw section header
+        term.setBackgroundColor(self.headerBackground)
+        term.setTextColor(self.headerColor)
+        term.setCursorPos(absX, currentY)
+        
+        local expandIcon = isExpanded and "v" or ">"
+        local headerText = expandIcon .. " " .. (section.title or ("Section " .. i))
+        headerText = headerText:sub(1, self.width - 1)
+        headerText = headerText .. string.rep(" ", self.width - #headerText)
+        term.write(headerText)
+        
+        currentY = currentY + self.headerHeight
+        
+        -- Draw section content if expanded
+        if isExpanded then
+            local content = section.content or {}
+            local contentHeight = type(content) == "table" and #content or self.sectionHeight
+            
+            term.setBackgroundColor(self.contentBackground)
+            term.setTextColor(self.contentColor)
+            
+            if type(content) == "table" then
+                for j, line in ipairs(content) do
+                    if currentY - absY < self.height then
+                        term.setCursorPos(absX, currentY)
+                        local displayLine = tostring(line):sub(1, self.width)
+                        displayLine = displayLine .. string.rep(" ", self.width - #displayLine)
+                        term.write(displayLine)
+                        currentY = currentY + 1
+                    end
+                end
+            elseif type(content) == "string" then
+                -- Word wrap the content
+                local words = {}
+                for word in content:gmatch("%S+") do
+                    table.insert(words, word)
+                end
+                
+                local line = ""
+                for _, word in ipairs(words) do
+                    if #line + #word + 1 <= self.width then
+                        line = line .. (line ~= "" and " " or "") .. word
+                    else
+                        if currentY - absY < self.height then
+                            term.setCursorPos(absX, currentY)
+                            local displayLine = line .. string.rep(" ", self.width - #line)
+                            term.write(displayLine)
+                            currentY = currentY + 1
+                        end
+                        line = word
+                    end
+                end
+                
+                if line ~= "" and currentY - absY < self.height then
+                    term.setCursorPos(absX, currentY)
+                    local displayLine = line .. string.rep(" ", self.width - #line)
+                    term.write(displayLine)
+                    currentY = currentY + 1
+                end
+            end
+        end
+        
+        -- Draw separator line
+        if i < #self.sections then
+            term.setBackgroundColor(self.borderColor)
+            term.setCursorPos(absX, currentY)
+            term.write(string.rep(" ", self.width))
+            currentY = currentY + 1
+        end
+        
+        -- Stop if we've exceeded the widget height
+        if currentY - absY >= self.height then
+            break
+        end
+    end
+    
+    -- Fill remaining space
+    term.setBackgroundColor(self.background or colors.black)
+    while currentY - absY < self.height do
+        term.setCursorPos(absX, currentY)
+        term.write(string.rep(" ", self.width))
+        currentY = currentY + 1
+    end
+    
+    term.setBackgroundColor(colors.black)
+end
+
+function Accordion:onClick(relX, relY)
+    if not self.enabled then return false end
+    
+    local currentY = 1
+    
+    for i, section in ipairs(self.sections) do
+        -- Check if click is on header
+        if relY >= currentY and relY < currentY + self.headerHeight then
+            self:toggleSection(i)
+            return true
+        end
+        
+        currentY = currentY + self.headerHeight
+        
+        -- Skip content area if expanded
+        if self.expandedSections[i] then
+            local content = section.content or {}
+            local contentHeight = type(content) == "table" and #content or self.sectionHeight
+            currentY = currentY + contentHeight
+        end
+        
+        -- Skip separator
+        if i < #self.sections then
+            currentY = currentY + 1
+        end
+        
+        if currentY > self.height then
+            break
+        end
+    end
+    
+    return false
+end
+
+function Accordion:toggleSection(index)
+    if not self.allowMultiple then
+        -- Close all other sections
+        self.expandedSections = {}
+    end
+    
+    self.expandedSections[index] = not self.expandedSections[index]
+    
+    if self.onSectionToggle then
+        self:onSectionToggle(index, self.expandedSections[index])
+    end
+end
+
+function Accordion:expandSection(index)
+    if not self.allowMultiple then
+        self.expandedSections = {}
+    end
+    self.expandedSections[index] = true
+end
+
+function Accordion:collapseSection(index)
+    self.expandedSections[index] = false
+end
+
+-- Minimap Widget (Overview of large content)
+local Minimap = setmetatable({}, {__index = Widget})
+Minimap.__index = Minimap
+
+function Minimap:new(props)
+    local minimap = Widget.new(self, props)
+    minimap.sourceWidget = props.sourceWidget
+    minimap.scale = props.scale or 4 -- How many source pixels per minimap pixel
+    minimap.viewportColor = props.viewportColor or colors.red
+    minimap.contentColor = props.contentColor or colors.white
+    minimap.backgroundColor = props.backgroundColor or colors.gray
+    minimap.showViewport = props.showViewport ~= false
+    minimap.onClick = props.onClick
+    minimap.interactive = props.interactive ~= false
+    
+    return minimap
+end
+
+function Minimap:render()
+    if not self.visible or not self.sourceWidget then return end
+    
+    local absX, absY = self:getAbsolutePos()
+    
+    -- Draw background
+    term.setBackgroundColor(self.backgroundColor)
+    for i = 0, self.height - 1 do
+        term.setCursorPos(absX, absY + i)
+        term.write(string.rep(" ", self.width))
+    end
+    
+    -- Draw border
+    drawCharBorder(absX, absY, self.width, self.height, colors.lightGray, self.backgroundColor)
+    
+    local contentX = absX + 1
+    local contentY = absY + 1
+    local contentWidth = self.width - 2
+    local contentHeight = self.height - 2
+    
+    -- Simplified representation of source content
+    if self.sourceWidget then
+        -- Draw content representation
+        term.setTextColor(self.contentColor)
+        
+        -- If source is a text widget, show text density
+        if self.sourceWidget.lines then
+            local sourceLines = self.sourceWidget.lines or {}
+            local linesPerPixel = math.max(1, #sourceLines / contentHeight)
+            
+            for y = 0, contentHeight - 1 do
+                term.setCursorPos(contentX, contentY + y)
+                local sourceLineStart = math.floor(y * linesPerPixel) + 1
+                local sourceLineEnd = math.floor((y + 1) * linesPerPixel)
+                
+                -- Calculate content density for this row
+                local density = 0
+                for lineIdx = sourceLineStart, math.min(sourceLineEnd, #sourceLines) do
+                    local line = sourceLines[lineIdx] or ""
+                    density = density + #line
+                end
+                density = density / ((sourceLineEnd - sourceLineStart + 1) * contentWidth)
+                
+                -- Draw density representation
+                local char = " "
+                if density > 0.7 then char = "#"
+                elseif density > 0.4 then char = "="
+                elseif density > 0.1 then char = "-"
+                end
+                
+                term.write(string.rep(char, contentWidth))
+            end
+        else
+            -- Generic content representation
+            term.setCursorPos(contentX, contentY)
+            for i = 1, contentHeight do
+                term.setCursorPos(contentX, contentY + i - 1)
+                term.write(string.rep(".", contentWidth))
+            end
+        end
+        
+        -- Draw viewport indicator
+        if self.showViewport and self.sourceWidget.scrollX ~= nil and self.sourceWidget.scrollY ~= nil then
+            local sourceWidth = self.sourceWidget.width or 80
+            local sourceHeight = self.sourceWidget.height or 24
+            local sourceContentWidth = sourceWidth
+            local sourceContentHeight = #(self.sourceWidget.lines or {})
+            
+            if sourceContentHeight > 0 then
+                local viewportX = math.floor((self.sourceWidget.scrollX or 0) / self.scale)
+                local viewportY = math.floor((self.sourceWidget.scrollY or 0) * contentHeight / sourceContentHeight)
+                local viewportWidth = math.max(1, math.floor(sourceWidth / self.scale))
+                local viewportHeight = math.max(1, math.floor(sourceHeight * contentHeight / sourceContentHeight))
+                
+                -- Ensure viewport stays within bounds
+                viewportX = math.max(0, math.min(viewportX, contentWidth - viewportWidth))
+                viewportY = math.max(0, math.min(viewportY, contentHeight - viewportHeight))
+                
+                -- Draw viewport rectangle
+                term.setTextColor(self.viewportColor)
+                term.setBackgroundColor(self.viewportColor)
+                
+                -- Top and bottom borders
+                for x = 0, viewportWidth - 1 do
+                    if contentX + viewportX + x < absX + self.width - 1 then
+                        term.setCursorPos(contentX + viewportX + x, contentY + viewportY)
+                        term.write(" ")
+                        if viewportHeight > 1 then
+                            term.setCursorPos(contentX + viewportX + x, contentY + viewportY + viewportHeight - 1)
+                            term.write(" ")
+                        end
+                    end
+                end
+                
+                -- Left and right borders
+                for y = 1, viewportHeight - 2 do
+                    if contentY + viewportY + y < absY + self.height - 1 then
+                        term.setCursorPos(contentX + viewportX, contentY + viewportY + y)
+                        term.write(" ")
+                        if viewportWidth > 1 then
+                            term.setCursorPos(contentX + viewportX + viewportWidth - 1, contentY + viewportY + y)
+                            term.write(" ")
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    term.setBackgroundColor(colors.black)
+end
+
+function Minimap:onClick(relX, relY)
+    if not self.enabled or not self.interactive or not self.sourceWidget then return false end
+    
+    -- Calculate click position in source coordinates
+    local contentX = relX - 1 -- Adjust for border
+    local contentY = relY - 1
+    local contentWidth = self.width - 2
+    local contentHeight = self.height - 2
+    
+    if contentX >= 0 and contentX < contentWidth and contentY >= 0 and contentY < contentHeight then
+        if self.sourceWidget.scrollX ~= nil and self.sourceWidget.scrollY ~= nil then
+            -- Calculate new scroll position
+            local sourceContentHeight = #(self.sourceWidget.lines or {})
+            
+            if sourceContentHeight > 0 then
+                local newScrollY = math.floor((contentY / contentHeight) * sourceContentHeight)
+                local newScrollX = contentX * self.scale
+                
+                -- Update source widget scroll position
+                self.sourceWidget.scrollY = math.max(0, math.min(newScrollY, sourceContentHeight - self.sourceWidget.height))
+                self.sourceWidget.scrollX = math.max(0, newScrollX)
+                
+                if self.sourceWidget.ensureCursorVisible then
+                    self.sourceWidget:ensureCursorVisible()
+                end
+            end
+        end
+        
+        if self.onClick then
+            self:onClick(contentX, contentY)
+        end
+        
+        return true
+    end
+    
+    return false
+end
+
+-- StatusBar Widget (Bottom status information)
+local StatusBar = setmetatable({}, {__index = Widget})
+StatusBar.__index = StatusBar
+
+function StatusBar:new(props)
+    local statusbar = Widget.new(self, props)
+    statusbar.sections = props.sections or {}
+    statusbar.separator = props.separator or " | "
+    statusbar.align = props.align or "left" -- "left", "right", "center"
+    statusbar.showTime = props.showTime or false
+    statusbar.timeFormat = props.timeFormat or "%H:%M"
+    statusbar.color = props.color or colors.white
+    statusbar.background = props.background or colors.gray
+    statusbar.height = 1 -- Status bars are always 1 line tall
+    
+    return statusbar
+end
+
+function StatusBar:render()
+    if not self.visible then return end
+    
+    local absX, absY = self:getAbsolutePos()
+    
+    -- Draw background
+    term.setBackgroundColor(self.background)
+    term.setTextColor(self.color)
+    term.setCursorPos(absX, absY)
+    term.write(string.rep(" ", self.width))
+    
+    -- Collect all sections
+    local allSections = {}
+    
+    -- Add custom sections
+    for _, section in ipairs(self.sections) do
+        if type(section) == "string" then
+            table.insert(allSections, section)
+        elseif type(section) == "function" then
+            local result = section()
+            if result then
+                table.insert(allSections, tostring(result))
+            end
+        elseif type(section) == "table" and section.text then
+            table.insert(allSections, section.text)
+        end
+    end
+    
+    -- Add time if enabled
+    if self.showTime then
+        local timeStr = os.date(self.timeFormat)
+        table.insert(allSections, timeStr)
+    end
+    
+    -- Combine sections with separator
+    local statusText = table.concat(allSections, self.separator)
+    
+    -- Truncate if too long
+    if #statusText > self.width then
+        statusText = statusText:sub(1, self.width - 3) .. "..."
+    end
+    
+    -- Position text based on alignment
+    local textX = absX
+    if self.align == "center" then
+        textX = absX + math.floor((self.width - #statusText) / 2)
+    elseif self.align == "right" then
+        textX = absX + self.width - #statusText
+    end
+    
+    term.setCursorPos(textX, absY)
+    term.write(statusText)
+    
+    term.setBackgroundColor(colors.black)
+end
+
+function StatusBar:addSection(section)
+    table.insert(self.sections, section)
+end
+
+function StatusBar:removeSection(index)
+    if index >= 1 and index <= #self.sections then
+        table.remove(self.sections, index)
+    end
+end
+
+function StatusBar:updateSection(index, newSection)
+    if index >= 1 and index <= #self.sections then
+        self.sections[index] = newSection
+    end
+end
+
+function StatusBar:clearSections()
+    self.sections = {}
+end
+
 -- FilePicker Widget
 local FilePicker = setmetatable({}, {__index = Widget})
 FilePicker.__index = FilePicker
@@ -6263,6 +7210,51 @@ function PixelUI.filePicker(props)
     return picker
 end
 
+function PixelUI.richTextBox(props)
+    local richtext = RichTextBox:new(props)
+    table.insert(widgets, richtext)
+    if rootContainer then
+        rootContainer:addChild(richtext)
+    end
+    return richtext
+end
+
+function PixelUI.codeEditor(props)
+    local editor = CodeEditor:new(props)
+    table.insert(widgets, editor)
+    if rootContainer then
+        rootContainer:addChild(editor)
+    end
+    return editor
+end
+
+function PixelUI.accordion(props)
+    local accordion = Accordion:new(props)
+    table.insert(widgets, accordion)
+    if rootContainer then
+        rootContainer:addChild(accordion)
+    end
+    return accordion
+end
+
+function PixelUI.minimap(props)
+    local minimap = Minimap:new(props)
+    table.insert(widgets, minimap)
+    if rootContainer then
+        rootContainer:addChild(minimap)
+    end
+    return minimap
+end
+
+function PixelUI.statusBar(props)
+    local statusbar = StatusBar:new(props)
+    table.insert(widgets, statusbar)
+    if rootContainer then
+        rootContainer:addChild(statusbar)
+    end
+    return statusbar
+end
+
 -- Convenience function for showing toast notifications
 function PixelUI.showToast(message, title, type, duration)
     local toast = PixelUI.notificationToast({
@@ -6712,6 +7704,12 @@ PixelUI.LoadingIndicator = LoadingIndicator
 PixelUI.Spinner = Spinner
 PixelUI.NotificationToast = NotificationToast
 PixelUI.DataGrid = DataGrid
+PixelUI.FilePicker = FilePicker
+PixelUI.RichTextBox = RichTextBox
+PixelUI.CodeEditor = CodeEditor
+PixelUI.Accordion = Accordion
+PixelUI.Minimap = Minimap
+PixelUI.StatusBar = StatusBar
 
 -- Export thread manager for advanced usage
 PixelUI.ThreadManager = ThreadManager
