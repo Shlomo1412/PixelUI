@@ -267,8 +267,8 @@ function demo:prevFrame()
 end
 
 function demo:refreshFrame()
-    -- PixelUI.clear()
-    -- self:createFrameUI()
+    PixelUI.clear()
+    self:createFrameUI()
 end
 
 -- Main frame UI creation

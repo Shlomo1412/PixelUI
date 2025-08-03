@@ -5529,7 +5529,14 @@ function RichTextBox:insertText(text)
     local after = currentLine:sub(self.cursorX)
     
     -- Handle newlines
-    if text:find("\n") then
+    if text == "\n" then
+        -- Simple newline insertion
+        self.lines[self.cursorY] = before
+        table.insert(self.lines, self.cursorY + 1, after)
+        self.cursorY = self.cursorY + 1
+        self.cursorX = 1
+    elseif text:find("\n") then
+        -- Handle multiple lines (paste)
         local lines = {}
         for line in text:gmatch("[^\n]*") do
             table.insert(lines, line)
@@ -5541,8 +5548,12 @@ function RichTextBox:insertText(text)
         end
         
         self.cursorY = self.cursorY + #lines - 1
-        self.cursorX = #lines[#lines] + (before ~= "" and #before or 0) + 1
+        self.cursorX = #lines[#lines] + 1
+        if #lines == 1 then
+            self.cursorX = self.cursorX + #before
+        end
     else
+        -- Regular text insertion
         self.lines[self.cursorY] = before .. text .. after
         self.cursorX = self.cursorX + #text
     end
