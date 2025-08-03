@@ -7733,6 +7733,444 @@ PixelUI.ThreadManager = ThreadManager
 -- PLUGIN SYSTEM
 -- ========================================
 
+-- Enhanced Event System
+local EventManager = {
+    listeners = {},
+    once = {}
+}
+
+function EventManager:on(eventName, callback, once)
+    if not self.listeners[eventName] then
+        self.listeners[eventName] = {}
+    end
+    
+    local listener = {
+        callback = callback,
+        id = #self.listeners[eventName] + 1
+    }
+    
+    table.insert(self.listeners[eventName], listener)
+    
+    if once then
+        if not self.once[eventName] then
+            self.once[eventName] = {}
+        end
+        self.once[eventName][listener.id] = true
+    end
+    
+    return listener.id
+end
+
+function EventManager:off(eventName, listenerId)
+    if not self.listeners[eventName] then return false end
+    
+    for i, listener in ipairs(self.listeners[eventName]) do
+        if listener.id == listenerId then
+            table.remove(self.listeners[eventName], i)
+            if self.once[eventName] then
+                self.once[eventName][listenerId] = nil
+            end
+            return true
+        end
+    end
+    return false
+end
+
+function EventManager:emit(eventName, data)
+    if not self.listeners[eventName] then return {} end
+    
+    local results = {}
+    local toRemove = {}
+    
+    for i, listener in ipairs(self.listeners[eventName]) do
+        local success, result = pcall(listener.callback, data)
+        if success then
+            table.insert(results, result)
+        end
+        
+        -- Mark for removal if it's a once listener
+        if self.once[eventName] and self.once[eventName][listener.id] then
+            table.insert(toRemove, i)
+        end
+    end
+    
+    -- Remove once listeners (in reverse order to maintain indices)
+    for i = #toRemove, 1, -1 do
+        local idx = toRemove[i]
+        local listener = self.listeners[eventName][idx]
+        table.remove(self.listeners[eventName], idx)
+        if self.once[eventName] then
+            self.once[eventName][listener.id] = nil
+        end
+    end
+    
+    return results
+end
+
+function EventManager:listEvents()
+    local events = {}
+    for eventName, listeners in pairs(self.listeners) do
+        events[eventName] = #listeners
+    end
+    return events
+end
+
+-- Service Registry System
+local ServiceRegistry = {
+    services = {}
+}
+
+function ServiceRegistry:register(serviceName, serviceInstance)
+    if self.services[serviceName] then
+        error("Service '" .. serviceName .. "' is already registered")
+    end
+    
+    self.services[serviceName] = serviceInstance
+    
+    -- Emit service registration event
+    EventManager:emit("serviceRegistered", {
+        name = serviceName,
+        service = serviceInstance
+    })
+    
+    return true
+end
+
+function ServiceRegistry:unregister(serviceName)
+    if not self.services[serviceName] then
+        return false
+    end
+    
+    local service = self.services[serviceName]
+    self.services[serviceName] = nil
+    
+    -- Emit service unregistration event
+    EventManager:emit("serviceUnregistered", {
+        name = serviceName,
+        service = service
+    })
+    
+    return true
+end
+
+function ServiceRegistry:get(serviceName)
+    return self.services[serviceName]
+end
+
+function ServiceRegistry:list()
+    local serviceList = {}
+    for name, _ in pairs(self.services) do
+        table.insert(serviceList, name)
+    end
+    return serviceList
+end
+
+function ServiceRegistry:exists(serviceName)
+    return self.services[serviceName] ~= nil
+end
+
+-- Configuration Management System
+local ConfigManager = {
+    configs = {},
+    defaults = {}
+}
+
+function ConfigManager:setDefault(pluginId, defaultConfig)
+    self.defaults[pluginId] = defaultConfig
+    
+    -- If no config exists yet, use the default
+    if not self.configs[pluginId] then
+        self.configs[pluginId] = self:deepCopy(defaultConfig)
+    end
+end
+
+function ConfigManager:get(pluginId, key)
+    local config = self.configs[pluginId] or {}
+    
+    if key then
+        return config[key]
+    else
+        return config
+    end
+end
+
+function ConfigManager:set(pluginId, key, value)
+    if not self.configs[pluginId] then
+        self.configs[pluginId] = {}
+    end
+    
+    if type(key) == "table" then
+        -- Setting entire config
+        self.configs[pluginId] = self:mergeConfig(self.defaults[pluginId] or {}, key)
+    else
+        -- Setting single key
+        self.configs[pluginId][key] = value
+    end
+    
+    -- Emit config change event
+    EventManager:emit("configChanged", {
+        pluginId = pluginId,
+        key = key,
+        value = value,
+        config = self.configs[pluginId]
+    })
+end
+
+function ConfigManager:merge(pluginId, newConfig)
+    local existing = self.configs[pluginId] or {}
+    self.configs[pluginId] = self:mergeConfig(existing, newConfig)
+    
+    -- Emit config change event
+    EventManager:emit("configChanged", {
+        pluginId = pluginId,
+        config = self.configs[pluginId]
+    })
+end
+
+function ConfigManager:reset(pluginId)
+    if self.defaults[pluginId] then
+        self.configs[pluginId] = self:deepCopy(self.defaults[pluginId])
+    else
+        self.configs[pluginId] = {}
+    end
+end
+
+function ConfigManager:validate(pluginId, schema)
+    local config = self.configs[pluginId] or {}
+    
+    for key, validation in pairs(schema) do
+        local value = config[key]
+        
+        -- Check required
+        if validation.required and value == nil then
+            error("Missing required config key: " .. key)
+        end
+        
+        -- Check type
+        if value ~= nil and validation.type and type(value) ~= validation.type then
+            error("Invalid type for config key '" .. key .. "': expected " .. validation.type .. ", got " .. type(value))
+        end
+        
+        -- Check min/max for numbers
+        if value ~= nil and type(value) == "number" then
+            if validation.min and value < validation.min then
+                error("Config key '" .. key .. "' must be at least " .. validation.min)
+            end
+            if validation.max and value > validation.max then
+                error("Config key '" .. key .. "' must be at most " .. validation.max)
+            end
+        end
+    end
+    
+    return true
+end
+
+function ConfigManager:deepCopy(orig)
+    local copy = {}
+    for key, value in pairs(orig) do
+        if type(value) == "table" then
+            copy[key] = self:deepCopy(value)
+        else
+            copy[key] = value
+        end
+    end
+    return copy
+end
+
+function ConfigManager:mergeConfig(defaults, userConfig)
+    local merged = self:deepCopy(defaults)
+    
+    for key, value in pairs(userConfig) do
+        if type(value) == "table" and type(merged[key]) == "table" then
+            merged[key] = self:mergeConfig(merged[key], value)
+        else
+            merged[key] = value
+        end
+    end
+    
+    return merged
+end
+
+-- Drawing Utilities API
+local DrawingUtils = {
+    
+}
+
+function DrawingUtils.drawPixel(x, y, color, bgColor)
+    if bgColor then
+        term.setBackgroundColor(bgColor)
+    end
+    if color then
+        term.setTextColor(color)
+    end
+    term.setCursorPos(x, y)
+    term.write(" ")
+end
+
+function DrawingUtils.drawText(x, y, text, color, bgColor)
+    if bgColor then
+        term.setBackgroundColor(bgColor)
+    end
+    if color then
+        term.setTextColor(color)
+    end
+    term.setCursorPos(x, y)
+    term.write(text)
+end
+
+function DrawingUtils.drawFilledRect(x, y, width, height, color)
+    term.setBackgroundColor(color)
+    for row = 0, height - 1 do
+        term.setCursorPos(x, y + row)
+        term.write(string.rep(" ", width))
+    end
+end
+
+function DrawingUtils.drawBorder(x, y, width, height, borderColor, bgColor)
+    bgColor = bgColor or colors.black
+    drawCharBorder(x, y, width, height, borderColor, bgColor)
+end
+
+function DrawingUtils.drawLine(x1, y1, x2, y2, color, char)
+    char = char or " "
+    if color then
+        term.setBackgroundColor(color)
+    end
+    
+    local dx = math.abs(x2 - x1)
+    local dy = math.abs(y2 - y1)
+    local sx = x1 < x2 and 1 or -1
+    local sy = y1 < y2 and 1 or -1
+    local err = dx - dy
+    
+    local x, y = x1, y1
+    
+    while true do
+        term.setCursorPos(x, y)
+        term.write(char)
+        
+        if x == x2 and y == y2 then break end
+        
+        local e2 = 2 * err
+        if e2 > -dy then
+            err = err - dy
+            x = x + sx
+        end
+        if e2 < dx then
+            err = err + dx
+            y = y + sy
+        end
+    end
+end
+
+function DrawingUtils.drawCircle(centerX, centerY, radius, color, filled)
+    if color then
+        term.setBackgroundColor(color)
+    end
+    
+    if filled then
+        -- Draw filled circle
+        for y = -radius, radius do
+            for x = -radius, radius do
+                if x * x + y * y <= radius * radius then
+                    term.setCursorPos(centerX + x, centerY + y)
+                    term.write(" ")
+                end
+            end
+        end
+    else
+        -- Draw circle outline using Bresenham's algorithm
+        local x = 0
+        local y = radius
+        local d = 3 - 2 * radius
+        
+        local function drawCirclePoints(cx, cy, x, y)
+            local points = {
+                {cx + x, cy + y}, {cx - x, cy + y},
+                {cx + x, cy - y}, {cx - x, cy - y},
+                {cx + y, cy + x}, {cx - y, cy + x},
+                {cx + y, cy - x}, {cx - y, cy - x}
+            }
+            
+            for _, point in ipairs(points) do
+                term.setCursorPos(point[1], point[2])
+                term.write(" ")
+            end
+        end
+        
+        drawCirclePoints(centerX, centerY, x, y)
+        
+        while y >= x do
+            x = x + 1
+            if d > 0 then
+                y = y - 1
+                d = d + 4 * (x - y) + 10
+            else
+                d = d + 4 * x + 6
+            end
+            drawCirclePoints(centerX, centerY, x, y)
+        end
+    end
+end
+
+function DrawingUtils.drawArc(centerX, centerY, radius, startAngle, endAngle, color, thickness)
+    thickness = thickness or 1
+    if color then
+        term.setBackgroundColor(color)
+    end
+    
+    local angleStep = 1 / radius -- Smaller step for smoother arcs
+    
+    for angle = startAngle, endAngle, angleStep do
+        local rad = math.rad(angle)
+        for t = 0, thickness - 1 do
+            local x = centerX + math.floor((radius + t) * math.cos(rad))
+            local y = centerY + math.floor((radius + t) * math.sin(rad))
+            term.setCursorPos(x, y)
+            term.write(" ")
+        end
+    end
+end
+
+function DrawingUtils.drawGradient(x, y, width, height, startColor, endColor, direction)
+    direction = direction or "horizontal"
+    
+    -- Simple gradient approximation using available colors
+    local colors_list = {
+        colors.white, colors.orange, colors.magenta, colors.lightBlue,
+        colors.yellow, colors.lime, colors.pink, colors.gray,
+        colors.lightGray, colors.cyan, colors.purple, colors.blue,
+        colors.brown, colors.green, colors.red, colors.black
+    }
+    
+    if direction == "horizontal" then
+        for col = 0, width - 1 do
+            local factor = col / (width - 1)
+            -- Simple color interpolation (would need proper color mixing in real implementation)
+            local colorIndex = math.floor(factor * (#colors_list - 1)) + 1
+            local currentColor = colors_list[math.min(colorIndex, #colors_list)]
+            
+            term.setBackgroundColor(currentColor)
+            for row = 0, height - 1 do
+                term.setCursorPos(x + col, y + row)
+                term.write(" ")
+            end
+        end
+    else -- vertical
+        for row = 0, height - 1 do
+            local factor = row / (height - 1)
+            local colorIndex = math.floor(factor * (#colors_list - 1)) + 1
+            local currentColor = colors_list[math.min(colorIndex, #colors_list)]
+            
+            term.setBackgroundColor(currentColor)
+            for col = 0, width - 1 do
+                term.setCursorPos(x + col, y + row)
+                term.write(" ")
+            end
+        end
+    end
+end
+
 local PluginManager = {
     plugins = {},
     hooks = {},
@@ -7740,6 +8178,209 @@ local PluginManager = {
     themeExtensions = {},
     initialized = false
 }
+
+-- Enhanced dependency management
+function PluginManager:parseDependency(depString)
+    -- Parse dependency strings like "pluginId@1.2.0" or "pluginId>=1.0.0"
+    local id, constraint = depString:match("^([^@>=<]+)(.*)$")
+    if not id then
+        return { id = depString, constraint = nil }
+    end
+    
+    local operator, version = "", ""
+    if constraint:match("^@") then
+        version = constraint:sub(2)
+        operator = "="
+    elseif constraint:match("^>=") then
+        version = constraint:sub(3)
+        operator = ">="
+    elseif constraint:match("^<=") then
+        version = constraint:sub(3)
+        operator = "<="
+    elseif constraint:match("^>") then
+        version = constraint:sub(2)
+        operator = ">"
+    elseif constraint:match("^<") then
+        version = constraint:sub(2)
+        operator = "<"
+    end
+    
+    return {
+        id = id,
+        constraint = constraint ~= "" and { operator = operator, version = version } or nil
+    }
+end
+
+function PluginManager:compareVersions(version1, version2)
+    -- Simple semantic version comparison
+    local function parseVersion(v)
+        local major, minor, patch = v:match("^(%d+)%.(%d+)%.(%d+)")
+        return {
+            major = tonumber(major) or 0,
+            minor = tonumber(minor) or 0,
+            patch = tonumber(patch) or 0
+        }
+    end
+    
+    local v1 = parseVersion(version1)
+    local v2 = parseVersion(version2)
+    
+    if v1.major ~= v2.major then
+        return v1.major - v2.major
+    elseif v1.minor ~= v2.minor then
+        return v1.minor - v2.minor
+    else
+        return v1.patch - v2.patch
+    end
+end
+
+function PluginManager:checkDependency(dependency, targetPlugin)
+    if not targetPlugin then
+        return false, "Plugin not found"
+    end
+    
+    if not dependency.constraint then
+        return true -- No version constraint
+    end
+    
+    local operator = dependency.constraint.operator
+    local requiredVersion = dependency.constraint.version
+    local actualVersion = targetPlugin.version
+    
+    local comparison = self:compareVersions(actualVersion, requiredVersion)
+    
+    if operator == "=" and comparison == 0 then
+        return true
+    elseif operator == ">=" and comparison >= 0 then
+        return true
+    elseif operator == "<=" and comparison <= 0 then
+        return true
+    elseif operator == ">" and comparison > 0 then
+        return true
+    elseif operator == "<" and comparison < 0 then
+        return true
+    end
+    
+    return false, "Version constraint not satisfied: requires " .. dependency.constraint.operator .. dependency.constraint.version .. ", found " .. actualVersion
+end
+
+function PluginManager:validateDependencies(plugin)
+    local missing = {}
+    local incompatible = {}
+    
+    for _, depString in ipairs(plugin.dependencies) do
+        local dependency = self:parseDependency(depString)
+        local targetPlugin = self.plugins[dependency.id]
+        
+        if not targetPlugin then
+            table.insert(missing, dependency.id)
+        elseif not targetPlugin.loaded then
+            table.insert(missing, dependency.id .. " (not loaded)")
+        else
+            local satisfied, reason = self:checkDependency(dependency, targetPlugin)
+            if not satisfied then
+                table.insert(incompatible, dependency.id .. ": " .. reason)
+            end
+        end
+    end
+    
+    return missing, incompatible
+end
+
+function PluginManager:detectCircularDependencies(pluginId, visited, chain)
+    visited = visited or {}
+    chain = chain or {}
+    
+    if visited[pluginId] then
+        return false -- Already processed, no cycle here
+    end
+    
+    for _, id in ipairs(chain) do
+        if id == pluginId then
+            return true, "Circular dependency detected: " .. table.concat(chain, " -> ") .. " -> " .. pluginId
+        end
+    end
+    
+    local plugin = self.plugins[pluginId]
+    if not plugin then
+        return false
+    end
+    
+    table.insert(chain, pluginId)
+    
+    for _, depString in ipairs(plugin.dependencies) do
+        local dependency = self:parseDependency(depString)
+        local hasCircle, reason = self:detectCircularDependencies(dependency.id, visited, chain)
+        if hasCircle then
+            return true, reason
+        end
+    end
+    
+    table.remove(chain)
+    visited[pluginId] = true
+    return false
+end
+
+function PluginManager:getDependents(pluginId)
+    local dependents = {}
+    for id, plugin in pairs(self.plugins) do
+        for _, depString in ipairs(plugin.dependencies) do
+            local dependency = self:parseDependency(depString)
+            if dependency.id == pluginId then
+                table.insert(dependents, id)
+                break
+            end
+        end
+    end
+    return dependents
+end
+
+function PluginManager:getLoadOrder(plugins)
+    local order = {}
+    local visited = {}
+    local visiting = {}
+    
+    local function visit(pluginId)
+        if visited[pluginId] then
+            return true
+        end
+        
+        if visiting[pluginId] then
+            return false, "Circular dependency involving " .. pluginId
+        end
+        
+        local plugin = plugins[pluginId] or self.plugins[pluginId]
+        if not plugin then
+            return false, "Plugin not found: " .. pluginId
+        end
+        
+        visiting[pluginId] = true
+        
+        for _, depString in ipairs(plugin.dependencies) do
+            local dependency = self:parseDependency(depString)
+            local success, err = visit(dependency.id)
+            if not success then
+                return false, err
+            end
+        end
+        
+        visiting[pluginId] = nil
+        visited[pluginId] = true
+        table.insert(order, pluginId)
+        return true
+    end
+    
+    for pluginId, _ in pairs(plugins) do
+        if not visited[pluginId] then
+            local success, err = visit(pluginId)
+            if not success then
+                return nil, err
+            end
+        end
+    end
+    
+    return order
+end
 
 -- Plugin registration and management
 function PluginManager:registerPlugin(pluginInfo)
@@ -7767,6 +8408,10 @@ function PluginManager:registerPlugin(pluginInfo)
         hooks = pluginInfo.hooks or {},
         api = pluginInfo.api or {},
         
+        -- Configuration support
+        config = pluginInfo.config or {},
+        configSchema = pluginInfo.configSchema or {},
+        
         -- Plugin state
         loaded = false,
         enabled = false,
@@ -7774,14 +8419,27 @@ function PluginManager:registerPlugin(pluginInfo)
         error = nil
     }
     
-    -- Validate dependencies
-    for _, depId in ipairs(plugin.dependencies) do
-        if not self.plugins[depId] or not self.plugins[depId].loaded then
-            error("Plugin '" .. plugin.id .. "' depends on '" .. depId .. "' which is not loaded")
-        end
+    -- Set up default configuration
+    if plugin.config and type(plugin.config) == "table" then
+        ConfigManager:setDefault(plugin.id, plugin.config)
     end
     
-    self.plugins[plugin.id] = plugin
+    -- Check for circular dependencies
+    self.plugins[plugin.id] = plugin -- Temporarily add for cycle detection
+    local hasCircle, reason = self:detectCircularDependencies(plugin.id)
+    if hasCircle then
+        self.plugins[plugin.id] = nil -- Remove from registry
+        error("Cannot register plugin '" .. plugin.id .. "': " .. reason)
+    end
+    
+    -- Don't validate dependencies yet - allow registration with missing deps
+    -- Dependencies will be validated during loading
+    
+    -- Emit plugin registration event
+    EventManager:emit("pluginRegistered", {
+        plugin = plugin
+    })
+    
     return plugin
 end
 
@@ -7795,11 +8453,24 @@ function PluginManager:loadPlugin(pluginId)
         return true -- Already loaded
     end
     
-    -- Load dependencies first
-    for _, depId in ipairs(plugin.dependencies) do
-        if not self:loadPlugin(depId) then
-            plugin.error = "Failed to load dependency: " .. depId
-            return false
+    -- Validate dependencies
+    local missing, incompatible = self:validateDependencies(plugin)
+    if #missing > 0 then
+        plugin.error = "Missing dependencies: " .. table.concat(missing, ", ")
+        return false, plugin.error
+    end
+    if #incompatible > 0 then
+        plugin.error = "Incompatible dependencies: " .. table.concat(incompatible, ", ")
+        return false, plugin.error
+    end
+    
+    -- Load dependencies first (in correct order)
+    for _, depString in ipairs(plugin.dependencies) do
+        local dependency = self:parseDependency(depString)
+        local success, err = self:loadPlugin(dependency.id)
+        if not success then
+            plugin.error = "Failed to load dependency '" .. dependency.id .. "': " .. (err or "Unknown error")
+            return false, plugin.error
         end
     end
     
@@ -7807,8 +8478,8 @@ function PluginManager:loadPlugin(pluginId)
     if plugin.onLoad then
         local success, err = pcall(plugin.onLoad, plugin)
         if not success then
-            plugin.error = err
-            return false
+            plugin.error = "Load callback failed: " .. (err or "Unknown error")
+            return false, plugin.error
         end
     end
     
@@ -7836,14 +8507,34 @@ function PluginManager:loadPlugin(pluginId)
     
     plugin.loaded = true
     plugin.loadTime = os.clock()
+    plugin.error = nil -- Clear any previous errors
+    
+    -- Emit plugin loaded event
+    EventManager:emit("pluginLoaded", {
+        plugin = plugin
+    })
     
     return true
 end
 
-function PluginManager:unloadPlugin(pluginId)
+function PluginManager:unloadPlugin(pluginId, force)
     local plugin = self.plugins[pluginId]
     if not plugin or not plugin.loaded then
         return false
+    end
+    
+    -- Check for dependent plugins
+    local dependents = self:getDependents(pluginId)
+    if #dependents > 0 and not force then
+        plugin.error = "Cannot unload plugin - other plugins depend on it: " .. table.concat(dependents, ", ")
+        return false, plugin.error
+    end
+    
+    -- If force unload, unload all dependents first
+    if force then
+        for _, dependentId in ipairs(dependents) do
+            self:unloadPlugin(dependentId, true)
+        end
     end
     
     -- Disable first if enabled
@@ -7879,6 +8570,13 @@ function PluginManager:unloadPlugin(pluginId)
     end
     
     plugin.loaded = false
+    plugin.error = nil
+    
+    -- Emit plugin unloaded event
+    EventManager:emit("pluginUnloaded", {
+        plugin = plugin
+    })
+    
     return true
 end
 
@@ -7897,6 +8595,12 @@ function PluginManager:enablePlugin(pluginId)
     end
     
     plugin.enabled = true
+    
+    -- Emit plugin enabled event
+    EventManager:emit("pluginEnabled", {
+        plugin = plugin
+    })
+    
     return true
 end
 
@@ -7911,6 +8615,12 @@ function PluginManager:disablePlugin(pluginId)
     end
     
     plugin.enabled = false
+    
+    -- Emit plugin disabled event
+    EventManager:emit("pluginDisabled", {
+        plugin = plugin
+    })
+    
     return true
 end
 
@@ -8050,7 +8760,7 @@ function PluginManager:loadPluginFromFile(filePath)
         select = select,
         print = print,
         
-        -- Plugin API
+        -- Enhanced plugin API
         registerPlugin = function(pluginInfo)
             local plugin = self:registerPlugin(pluginInfo)
             -- Immediately load the plugin after registration
@@ -8059,7 +8769,41 @@ function PluginManager:loadPluginFromFile(filePath)
                 error("Failed to auto-load plugin: " .. plugin.id .. " - " .. tostring(plugin.error))
             end
             return plugin
-        end
+        end,
+        
+        -- Event system access
+        emit = function(eventName, data)
+            return EventManager:emit(eventName, data)
+        end,
+        
+        on = function(eventName, callback, once)
+            return EventManager:on(eventName, callback, once)
+        end,
+        
+        off = function(eventName, listenerId)
+            return EventManager:off(eventName, listenerId)
+        end,
+        
+        -- Service registry access
+        registerService = function(serviceName, serviceInstance)
+            return ServiceRegistry:register(serviceName, serviceInstance)
+        end,
+        
+        getService = function(serviceName)
+            return ServiceRegistry:get(serviceName)
+        end,
+        
+        -- Configuration access
+        getConfig = function(pluginId, key)
+            return ConfigManager:get(pluginId or "global", key)
+        end,
+        
+        setConfig = function(pluginId, key, value)
+            return ConfigManager:set(pluginId or "global", key, value)
+        end,
+        
+        -- Drawing utilities
+        draw = DrawingUtils
     }
     
     -- Load and execute plugin file
@@ -8227,6 +8971,45 @@ function PixelUI.disablePlugin(pluginId)
     return PluginManager:disablePlugin(pluginId)
 end
 
+function PixelUI.forceUnloadPlugin(pluginId)
+    return PluginManager:unloadPlugin(pluginId, true)
+end
+
+function PixelUI.getPluginDependencies(pluginId)
+    local plugin = PluginManager:getPlugin(pluginId)
+    if not plugin then return nil end
+    
+    local deps = {}
+    for _, depString in ipairs(plugin.dependencies) do
+        local dependency = PluginManager:parseDependency(depString)
+        table.insert(deps, dependency)
+    end
+    return deps
+end
+
+function PixelUI.getPluginDependents(pluginId)
+    return PluginManager:getDependents(pluginId)
+end
+
+function PixelUI.validatePluginDependencies(pluginId)
+    local plugin = PluginManager:getPlugin(pluginId)
+    if not plugin then return false, "Plugin not found" end
+    
+    local missing, incompatible = PluginManager:validateDependencies(plugin)
+    return #missing == 0 and #incompatible == 0, missing, incompatible
+end
+
+function PixelUI.getPluginLoadOrder(pluginIds)
+    local plugins = {}
+    for _, id in ipairs(pluginIds) do
+        local plugin = PluginManager:getPlugin(id)
+        if plugin then
+            plugins[id] = plugin
+        end
+    end
+    return PluginManager:getLoadOrder(plugins)
+end
+
 function PixelUI.loadPluginFromFile(filePath)
     return PluginManager:loadPluginFromFile(filePath)
 end
@@ -8270,6 +9053,72 @@ end
 function PixelUI.listPluginThemes()
     return PluginManager:listThemes()
 end
+
+-- Event System API
+function PixelUI.on(eventName, callback, once)
+    return EventManager:on(eventName, callback, once)
+end
+
+function PixelUI.off(eventName, listenerId)
+    return EventManager:off(eventName, listenerId)
+end
+
+function PixelUI.emit(eventName, data)
+    return EventManager:emit(eventName, data)
+end
+
+function PixelUI.listEvents()
+    return EventManager:listEvents()
+end
+
+-- Service Registry API
+function PixelUI.registerService(serviceName, serviceInstance)
+    return ServiceRegistry:register(serviceName, serviceInstance)
+end
+
+function PixelUI.unregisterService(serviceName)
+    return ServiceRegistry:unregister(serviceName)
+end
+
+function PixelUI.getService(serviceName)
+    return ServiceRegistry:get(serviceName)
+end
+
+function PixelUI.listServices()
+    return ServiceRegistry:list()
+end
+
+function PixelUI.serviceExists(serviceName)
+    return ServiceRegistry:exists(serviceName)
+end
+
+-- Configuration API
+function PixelUI.getConfig(pluginId, key)
+    return ConfigManager:get(pluginId, key)
+end
+
+function PixelUI.setConfig(pluginId, key, value)
+    return ConfigManager:set(pluginId, key, value)
+end
+
+function PixelUI.getPluginConfig(pluginId)
+    return ConfigManager:get(pluginId)
+end
+
+function PixelUI.setPluginConfig(pluginId, config)
+    return ConfigManager:set(pluginId, config)
+end
+
+function PixelUI.resetPluginConfig(pluginId)
+    return ConfigManager:reset(pluginId)
+end
+
+function PixelUI.validatePluginConfig(pluginId, schema)
+    return ConfigManager:validate(pluginId, schema)
+end
+
+-- Drawing Utilities API
+PixelUI.draw = DrawingUtils
 
 -- Automatic plugin loading on init
 local originalInit = PixelUI.init
@@ -8322,7 +9171,50 @@ PixelUI.plugins = {
     end,
     isEnabled = function(pluginId)
         return PixelUI.isPluginEnabled(pluginId)
+    end,
+    -- Configuration shortcuts
+    getConfig = function(pluginId, key)
+        return PixelUI.getPluginConfig(pluginId, key)
+    end,
+    setConfig = function(pluginId, config)
+        return PixelUI.setPluginConfig(pluginId, config)
+    end,
+    resetConfig = function(pluginId)
+        return PixelUI.resetPluginConfig(pluginId)
+    end,
+    -- Dependency management shortcuts
+    getDependencies = function(pluginId)
+        return PixelUI.getPluginDependencies(pluginId)
+    end,
+    getDependents = function(pluginId)
+        return PixelUI.getPluginDependents(pluginId)
+    end,
+    validateDependencies = function(pluginId)
+        return PixelUI.validatePluginDependencies(pluginId)
+    end,
+    getLoadOrder = function(pluginIds)
+        return PixelUI.getPluginLoadOrder(pluginIds)
+    end,
+    forceUnload = function(pluginId)
+        return PixelUI.forceUnloadPlugin(pluginId)
     end
+}
+
+-- Event system shortcuts
+PixelUI.events = {
+    on = PixelUI.on,
+    off = PixelUI.off,
+    emit = PixelUI.emit,
+    list = PixelUI.listEvents
+}
+
+-- Service registry shortcuts
+PixelUI.services = {
+    register = PixelUI.registerService,
+    unregister = PixelUI.unregisterService,
+    get = PixelUI.getService,
+    list = PixelUI.listServices,
+    exists = PixelUI.serviceExists
 }
 
 return PixelUI
