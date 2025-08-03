@@ -514,7 +514,11 @@ end
 function Widget:addChild(child)
     child.parent = self
     table.insert(self.children, child)
-    table.sort(self.children, function(a, b) return a.zIndex < b.zIndex end)
+    table.sort(self.children, function(a, b) 
+        local aZ = a.zIndex or 0
+        local bZ = b.zIndex or 0
+        return aZ < bZ 
+    end)
 end
 
 function Widget:removeChild(child)
@@ -7724,5 +7728,502 @@ PixelUI.StatusBar = StatusBar
 
 -- Export thread manager for advanced usage
 PixelUI.ThreadManager = ThreadManager
+
+-- ========================================
+-- PLUGIN SYSTEM
+-- ========================================
+
+local PluginManager = {
+    plugins = {},
+    hooks = {},
+    widgetExtensions = {},
+    themeExtensions = {},
+    initialized = false
+}
+
+-- Plugin registration and management
+function PluginManager:registerPlugin(pluginInfo)
+    if type(pluginInfo) ~= "table" then
+        error("Plugin info must be a table")
+    end
+    
+    local plugin = {
+        id = pluginInfo.id or error("Plugin must have an id"),
+        name = pluginInfo.name or pluginInfo.id,
+        version = pluginInfo.version or "1.0.0",
+        author = pluginInfo.author or "Unknown",
+        description = pluginInfo.description or "",
+        dependencies = pluginInfo.dependencies or {},
+        
+        -- Plugin lifecycle functions
+        onLoad = pluginInfo.onLoad,
+        onUnload = pluginInfo.onUnload,
+        onEnable = pluginInfo.onEnable,
+        onDisable = pluginInfo.onDisable,
+        
+        -- Plugin content
+        widgets = pluginInfo.widgets or {},
+        themes = pluginInfo.themes or {},
+        hooks = pluginInfo.hooks or {},
+        api = pluginInfo.api or {},
+        
+        -- Plugin state
+        loaded = false,
+        enabled = false,
+        loadTime = nil,
+        error = nil
+    }
+    
+    -- Validate dependencies
+    for _, depId in ipairs(plugin.dependencies) do
+        if not self.plugins[depId] or not self.plugins[depId].loaded then
+            error("Plugin '" .. plugin.id .. "' depends on '" .. depId .. "' which is not loaded")
+        end
+    end
+    
+    self.plugins[plugin.id] = plugin
+    return plugin
+end
+
+function PluginManager:loadPlugin(pluginId)
+    local plugin = self.plugins[pluginId]
+    if not plugin then
+        error("Plugin '" .. pluginId .. "' not found")
+    end
+    
+    if plugin.loaded then
+        return true -- Already loaded
+    end
+    
+    -- Load dependencies first
+    for _, depId in ipairs(plugin.dependencies) do
+        if not self:loadPlugin(depId) then
+            plugin.error = "Failed to load dependency: " .. depId
+            return false
+        end
+    end
+    
+    -- Call plugin's onLoad function
+    if plugin.onLoad then
+        local success, err = pcall(plugin.onLoad, plugin)
+        if not success then
+            plugin.error = err
+            return false
+        end
+    end
+    
+    -- Register plugin widgets
+    for widgetName, widgetClass in pairs(plugin.widgets) do
+        self:registerWidget(widgetName, widgetClass, plugin)
+    end
+    
+    -- Register plugin themes
+    for themeName, themeData in pairs(plugin.themes) do
+        self:registerTheme(themeName, themeData, plugin)
+    end
+    
+    -- Register plugin hooks
+    for hookName, hookFunc in pairs(plugin.hooks) do
+        self:registerHook(hookName, hookFunc, plugin)
+    end
+    
+    -- Expose plugin API to PixelUI
+    if plugin.api then
+        for apiName, apiFunc in pairs(plugin.api) do
+            PixelUI[apiName] = apiFunc
+        end
+    end
+    
+    plugin.loaded = true
+    plugin.loadTime = os.clock()
+    
+    return true
+end
+
+function PluginManager:unloadPlugin(pluginId)
+    local plugin = self.plugins[pluginId]
+    if not plugin or not plugin.loaded then
+        return false
+    end
+    
+    -- Disable first if enabled
+    if plugin.enabled then
+        self:disablePlugin(pluginId)
+    end
+    
+    -- Call plugin's onUnload function
+    if plugin.onUnload then
+        pcall(plugin.onUnload, plugin)
+    end
+    
+    -- Remove plugin widgets
+    for widgetName, _ in pairs(plugin.widgets) do
+        self:unregisterWidget(widgetName, plugin)
+    end
+    
+    -- Remove plugin themes
+    for themeName, _ in pairs(plugin.themes) do
+        self:unregisterTheme(themeName, plugin)
+    end
+    
+    -- Remove plugin hooks
+    for hookName, _ in pairs(plugin.hooks) do
+        self:unregisterHook(hookName, plugin)
+    end
+    
+    -- Remove plugin API from PixelUI
+    if plugin.api then
+        for apiName, _ in pairs(plugin.api) do
+            PixelUI[apiName] = nil
+        end
+    end
+    
+    plugin.loaded = false
+    return true
+end
+
+function PluginManager:enablePlugin(pluginId)
+    local plugin = self.plugins[pluginId]
+    if not plugin or not plugin.loaded or plugin.enabled then
+        return false
+    end
+    
+    if plugin.onEnable then
+        local success, err = pcall(plugin.onEnable, plugin)
+        if not success then
+            plugin.error = err
+            return false
+        end
+    end
+    
+    plugin.enabled = true
+    return true
+end
+
+function PluginManager:disablePlugin(pluginId)
+    local plugin = self.plugins[pluginId]
+    if not plugin or not plugin.enabled then
+        return false
+    end
+    
+    if plugin.onDisable then
+        pcall(plugin.onDisable, plugin)
+    end
+    
+    plugin.enabled = false
+    return true
+end
+
+-- Widget extension system
+function PluginManager:registerWidget(widgetName, widgetClass, plugin)
+    if not widgetClass or type(widgetClass) ~= "table" then
+        error("Widget class must be a table")
+    end
+    
+    local fullName = "plugin_" .. widgetName
+    self.widgetExtensions[fullName] = {
+        class = widgetClass,
+        plugin = plugin,
+        name = widgetName
+    }
+    
+    -- Create factory function in PixelUI
+    PixelUI[widgetName] = function(props)
+        local widget = widgetClass:new(props)
+        table.insert(widgets, widget)
+        if rootContainer then
+            rootContainer:addChild(widget)
+        end
+        return widget
+    end
+end
+
+function PluginManager:unregisterWidget(widgetName, plugin)
+    local fullName = "plugin_" .. widgetName
+    if self.widgetExtensions[fullName] and self.widgetExtensions[fullName].plugin == plugin then
+        self.widgetExtensions[fullName] = nil
+        PixelUI[widgetName] = nil
+    end
+end
+
+-- Theme extension system
+function PluginManager:registerTheme(themeName, themeData, plugin)
+    if not themeData or type(themeData) ~= "table" then
+        error("Theme data must be a table")
+    end
+    
+    self.themeExtensions[themeName] = {
+        data = themeData,
+        plugin = plugin
+    }
+end
+
+function PluginManager:unregisterTheme(themeName, plugin)
+    if self.themeExtensions[themeName] and self.themeExtensions[themeName].plugin == plugin then
+        self.themeExtensions[themeName] = nil
+    end
+end
+
+function PluginManager:getTheme(themeName)
+    local theme = self.themeExtensions[themeName]
+    return theme and theme.data or nil
+end
+
+function PluginManager:listThemes()
+    local themes = {}
+    for name, _ in pairs(self.themeExtensions) do
+        table.insert(themes, name)
+    end
+    return themes
+end
+
+-- Hook system for plugin extensibility
+function PluginManager:registerHook(hookName, hookFunc, plugin)
+    if not self.hooks[hookName] then
+        self.hooks[hookName] = {}
+    end
+    
+    table.insert(self.hooks[hookName], {
+        func = hookFunc,
+        plugin = plugin
+    })
+end
+
+function PluginManager:unregisterHook(hookName, plugin)
+    if not self.hooks[hookName] then return end
+    
+    for i = #self.hooks[hookName], 1, -1 do
+        if self.hooks[hookName][i].plugin == plugin then
+            table.remove(self.hooks[hookName], i)
+        end
+    end
+end
+
+function PluginManager:runHook(hookName, ...)
+    if not self.hooks[hookName] then return end
+    
+    local results = {}
+    for _, hook in ipairs(self.hooks[hookName]) do
+        if hook.plugin.enabled then
+            local success, result = pcall(hook.func, ...)
+            if success then
+                table.insert(results, result)
+            end
+        end
+    end
+    return results
+end
+
+-- Plugin discovery and loading from files
+function PluginManager:loadPluginFromFile(filePath)
+    if not fs.exists(filePath) then
+        error("Plugin file not found: " .. filePath)
+    end
+    
+    local env = {
+        -- Provide safe environment for plugin
+        PixelUI = PixelUI,
+        colors = colors,
+        term = term,
+        fs = fs,
+        os = os,
+        math = math,
+        string = string,
+        table = table,
+        pairs = pairs,
+        ipairs = ipairs,
+        type = type,
+        tostring = tostring,
+        tonumber = tonumber,
+        error = error,
+        assert = assert,
+        pcall = pcall,
+        xpcall = xpcall,
+        coroutine = coroutine,
+        setmetatable = setmetatable,
+        getmetatable = getmetatable,
+        rawget = rawget,
+        rawset = rawset,
+        rawlen = rawlen,
+        next = next,
+        select = select,
+        print = print,
+        
+        -- Plugin API
+        registerPlugin = function(pluginInfo)
+            local plugin = self:registerPlugin(pluginInfo)
+            -- Immediately load the plugin after registration
+            local loadSuccess = self:loadPlugin(plugin.id)
+            if not loadSuccess then
+                error("Failed to auto-load plugin: " .. plugin.id .. " - " .. tostring(plugin.error))
+            end
+            return plugin
+        end
+    }
+    
+    -- Load and execute plugin file
+    local file = fs.open(filePath, "r")
+    local content = file.readAll()
+    file.close()
+    
+    local func, err = load(content, filePath, "t", env)
+    if not func then
+        error("Failed to load plugin: " .. err)
+    end
+    
+    local success, result = pcall(func)
+    if not success then
+        error("Failed to execute plugin: " .. result)
+    end
+    
+    return result
+end
+
+function PluginManager:loadPluginsFromDirectory(dirPath)
+    if not fs.exists(dirPath) or not fs.isDir(dirPath) then
+        return {}
+    end
+    
+    local loadedPlugins = {}
+    local files = fs.list(dirPath)
+    
+    for _, file in ipairs(files) do
+        if file:match("%.lua$") then
+            local fullPath = fs.combine(dirPath, file)
+            local success, result = pcall(function()
+                return self:loadPluginFromFile(fullPath)
+            end)
+            
+            if success then
+                table.insert(loadedPlugins, {
+                    file = file,
+                    path = fullPath,
+                    plugin = result
+                })
+            else
+                print("Failed to load plugin " .. file .. ": " .. result)
+            end
+        end
+    end
+    
+    return loadedPlugins
+end
+
+-- Plugin information and management
+function PluginManager:listPlugins()
+    local pluginList = {}
+    for id, plugin in pairs(self.plugins) do
+        table.insert(pluginList, {
+            id = id,
+            name = plugin.name,
+            version = plugin.version,
+            author = plugin.author,
+            description = plugin.description,
+            loaded = plugin.loaded,
+            enabled = plugin.enabled,
+            loadTime = plugin.loadTime,
+            error = plugin.error
+        })
+    end
+    return pluginList
+end
+
+function PluginManager:getPlugin(pluginId)
+    return self.plugins[pluginId]
+end
+
+function PluginManager:isPluginLoaded(pluginId)
+    local plugin = self.plugins[pluginId]
+    return plugin and plugin.loaded or false
+end
+
+function PluginManager:isPluginEnabled(pluginId)
+    local plugin = self.plugins[pluginId]
+    return plugin and plugin.enabled or false
+end
+
+-- Plugin system API for PixelUI
+function PixelUI.registerPlugin(pluginInfo)
+    return PluginManager:registerPlugin(pluginInfo)
+end
+
+function PixelUI.loadPlugin(pluginId)
+    return PluginManager:loadPlugin(pluginId)
+end
+
+function PixelUI.unloadPlugin(pluginId)
+    return PluginManager:unloadPlugin(pluginId)
+end
+
+function PixelUI.enablePlugin(pluginId)
+    return PluginManager:enablePlugin(pluginId)
+end
+
+function PixelUI.disablePlugin(pluginId)
+    return PluginManager:disablePlugin(pluginId)
+end
+
+function PixelUI.loadPluginFromFile(filePath)
+    return PluginManager:loadPluginFromFile(filePath)
+end
+
+function PixelUI.loadPluginsFromDirectory(dirPath)
+    return PluginManager:loadPluginsFromDirectory(dirPath)
+end
+
+function PixelUI.listPlugins()
+    return PluginManager:listPlugins()
+end
+
+function PixelUI.getPlugin(pluginId)
+    return PluginManager:getPlugin(pluginId)
+end
+
+function PixelUI.isPluginLoaded(pluginId)
+    return PluginManager:isPluginLoaded(pluginId)
+end
+
+function PixelUI.isPluginEnabled(pluginId)
+    return PluginManager:isPluginEnabled(pluginId)
+end
+
+function PixelUI.runHook(hookName, ...)
+    return PluginManager:runHook(hookName, ...)
+end
+
+function PixelUI.registerHook(hookName, hookFunc, plugin)
+    return PluginManager:registerHook(hookName, hookFunc, plugin)
+end
+
+function PixelUI.getPluginTheme(themeName)
+    return PluginManager:getTheme(themeName)
+end
+
+function PixelUI.listPluginThemes()
+    return PluginManager:listThemes()
+end
+
+-- Automatic plugin loading on init
+local originalInit = PixelUI.init
+function PixelUI.init()
+    originalInit()
+    
+    -- Auto-load plugins from standard directory
+    if fs.exists("plugins") and fs.isDir("plugins") then
+        PixelUI.loadPluginsFromDirectory("plugins")
+        
+        -- Auto-enable all loaded plugins
+        for _, plugin in pairs(PluginManager.plugins) do
+            if plugin.loaded then
+                PluginManager:enablePlugin(plugin.id)
+            end
+        end
+    end
+    
+    PluginManager.initialized = true
+end
+
+-- Export plugin manager for advanced usage
+PixelUI.PluginManager = PluginManager
 
 return PixelUI
