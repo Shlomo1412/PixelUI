@@ -1,3 +1,10 @@
+-- @name Example Plugin
+-- @version 1.0.0
+-- @description An example plugin for PixelUI demonstrating custom widgets, themes, and hooks
+-- @author Shlomo1412
+-- @type widget
+-- @tags custom, ui, widget
+
 -- Example PixelUI Plugin
 -- This demonstrates how to create a plugin for the PixelUI framework
 

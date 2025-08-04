@@ -5719,6 +5719,23 @@ function CodeEditor:new(props)
     editor.syntaxHighlight = props.syntaxHighlight ~= false
     editor.autoIndent = props.autoIndent ~= false
     editor.matchBrackets = props.matchBrackets ~= false
+    editor.autoComplete = props.autoComplete ~= false
+    
+    -- Auto-completion state
+    editor.completionVisible = false
+    editor.completionPrefix = ""
+    editor.completionOptions = {}
+    editor.completionSelected = 1
+    editor.completionStartX = 0
+    editor.completionStartY = 0
+    editor.maxCompletionHeight = props.maxCompletionHeight or 8
+    editor.maxCompletionWidth = props.maxCompletionWidth or 30
+    editor.completionBorder = props.completionBorder ~= false  -- Border enabled by default
+    editor.completionBorderColor = props.completionBorderColor or colors.gray
+    editor.completionBgColor = props.completionBgColor or colors.lightGray
+    editor.completionSelectedBgColor = props.completionSelectedBgColor or colors.blue
+    editor.completionTextColor = props.completionTextColor or colors.black
+    editor.completionSelectedTextColor = props.completionSelectedTextColor or colors.white
     
     -- Lua syntax highlighting
     editor.keywords = {
@@ -5728,6 +5745,38 @@ function CodeEditor:new(props)
         ["nil"] = true, ["not"] = true, ["or"] = true, ["repeat"] = true,
         ["return"] = true, ["then"] = true, ["true"] = true, ["until"] = true,
         ["while"] = true
+    }
+    
+    -- Auto-completion dictionaries
+    editor.completionSources = {
+        keywords = {
+            "and", "break", "do", "else", "elseif", "end", "false", "for",
+            "function", "if", "in", "local", "nil", "not", "or", "repeat",
+            "return", "then", "true", "until", "while"
+        },
+        builtins = {
+            "print", "error", "assert", "type", "tostring", "tonumber",
+            "pairs", "ipairs", "next", "pcall", "xpcall", "getmetatable", "setmetatable",
+            "rawget", "rawset", "rawlen", "select", "unpack", "pack"
+        },
+        string_methods = {
+            "byte", "char", "dump", "find", "format", "gmatch", "gsub",
+            "len", "lower", "match", "rep", "reverse", "sub", "upper"
+        },
+        table_methods = {
+            "concat", "insert", "maxn", "remove", "sort", "unpack"
+        },
+        math_methods = {
+            "abs", "acos", "asin", "atan", "atan2", "ceil", "cos", "cosh",
+            "deg", "exp", "floor", "fmod", "frexp", "huge", "ldexp", "log",
+            "log10", "max", "min", "modf", "pi", "pow", "rad", "random",
+            "randomseed", "sin", "sinh", "sqrt", "tan", "tanh"
+        },
+        cc_apis = {
+            "term", "colors", "fs", "os", "redstone", "peripheral", "turtle",
+            "http", "textutils", "vector", "bit", "bit32", "coroutine",
+            "paintutils", "parallel", "keys", "window", "multishell", "gps"
+        }
     }
     
     return editor
@@ -5800,6 +5849,9 @@ function CodeEditor:render()
     end
     
     term.setBackgroundColor(colors.black)
+    
+    -- Render auto-completion popup
+    self:renderAutoCompletion()
 end
 
 function CodeEditor:renderSyntaxHighlightedLine(line, x, y)
@@ -5879,6 +5931,388 @@ function CodeEditor:renderSyntaxHighlightedLine(line, x, y)
         
         ::continue::
     end
+end
+
+-- Auto-completion methods for CodeEditor
+function CodeEditor:showAutoCompletion()
+    if not self.autoComplete then return end
+    
+    -- Debug: Always show something for testing
+    print("Auto-completion triggered!")
+    
+    local currentLine = self.lines[self.cursorY] or ""
+    local beforeCursor = currentLine:sub(1, self.cursorX - 1)
+    
+    -- Find the current word being typed
+    local wordStart = 1
+    for i = self.cursorX - 1, 1, -1 do
+        local char = beforeCursor:sub(i, i)
+        if not char:match("[%w_]") then
+            wordStart = i + 1
+            break
+        end
+    end
+    
+    self.completionPrefix = beforeCursor:sub(wordStart)
+    print("Completion prefix: '" .. self.completionPrefix .. "'")
+    
+    -- Always show at least some basic completions for testing
+    self.completionOptions = {}
+    
+    -- Add some basic test completions
+    local testCompletions = {"function", "local", "if", "then", "end", "for", "while", "do"}
+    for _, item in ipairs(testCompletions) do
+        if #self.completionPrefix == 0 or item:lower():find(self.completionPrefix:lower(), 1, true) == 1 then
+            table.insert(self.completionOptions, {
+                text = item,
+                category = "test",
+                display = item .. " (test)"
+            })
+        end
+    end
+    
+    -- Safely add completion options with nil checks
+    if self.completionSources then
+        if self.completionSources.keywords then
+            self:addCompletionOptions(self.completionSources.keywords, "keyword")
+        end
+        if self.completionSources.builtins then
+            self:addCompletionOptions(self.completionSources.builtins, "builtin")
+        end
+        
+        -- Context-aware completions
+        if beforeCursor:match("string%.%w*$") and self.completionSources.string_methods then
+            self:addCompletionOptions(self.completionSources.string_methods, "method")
+        elseif beforeCursor:match("table%.%w*$") and self.completionSources.table_methods then
+            self:addCompletionOptions(self.completionSources.table_methods, "method")
+        elseif beforeCursor:match("math%.%w*$") and self.completionSources.math_methods then
+            self:addCompletionOptions(self.completionSources.math_methods, "method")
+        elseif self.completionSources.cc_apis then
+            self:addCompletionOptions(self.completionSources.cc_apis, "api")
+        end
+    end
+    
+    -- Add variables from current scope
+    self:addVariableCompletions()
+    
+    print("Total completion options: " .. #self.completionOptions)
+    
+    -- Sort by relevance (exact prefix match first, then alphabetical)
+    table.sort(self.completionOptions, function(a, b)
+        local aExact = a.text:sub(1, #self.completionPrefix):lower() == self.completionPrefix:lower()
+        local bExact = b.text:sub(1, #self.completionPrefix):lower() == self.completionPrefix:lower()
+        
+        if aExact ~= bExact then
+            return aExact
+        end
+        return a.text < b.text
+    end)
+    
+    if #self.completionOptions > 0 then
+        self.completionVisible = true
+        self.completionSelected = 1
+        self.completionStartX = wordStart
+        self.completionStartY = self.cursorY
+        print("Showing completion popup with " .. #self.completionOptions .. " options")
+    else
+        self:hideAutoCompletion()
+        print("No completions found, hiding popup")
+    end
+end
+
+function CodeEditor:addCompletionOptions(source, category)
+    if not source then return end
+    
+    for _, item in ipairs(source) do
+        if item and item:lower():find(self.completionPrefix:lower(), 1, true) == 1 then
+            table.insert(self.completionOptions, {
+                text = item,
+                category = category,
+                display = item .. " (" .. category .. ")"
+            })
+        end
+    end
+end
+
+function CodeEditor:addVariableCompletions()
+    -- Extract variable names from current file
+    local variables = {}
+    
+    for lineNum, line in ipairs(self.lines) do
+        -- Find local variable declarations
+        for var in line:gmatch("local%s+([%w_]+)") do
+            if var:lower():find(self.completionPrefix:lower(), 1, true) == 1 then
+                variables[var] = true
+            end
+        end
+        
+        -- Find function parameters
+        for params in line:gmatch("function[^%(]*%(([^%)]*)%)") do
+            for param in params:gmatch("([%w_]+)") do
+                if param:lower():find(self.completionPrefix:lower(), 1, true) == 1 then
+                    variables[param] = true
+                end
+            end
+        end
+        
+        -- Find assignments
+        for var in line:gmatch("([%w_]+)%s*=") do
+            if var:lower():find(self.completionPrefix:lower(), 1, true) == 1 then
+                variables[var] = true
+            end
+        end
+    end
+    
+    for var, _ in pairs(variables) do
+        table.insert(self.completionOptions, {
+            text = var,
+            category = "variable",
+            display = var .. " (variable)"
+        })
+    end
+end
+
+function CodeEditor:hideAutoCompletion()
+    self.completionVisible = false
+    self.completionOptions = {}
+    self.completionSelected = 1
+end
+
+function CodeEditor:selectCompletion(direction)
+    if not self.completionVisible or #self.completionOptions == 0 then return end
+    
+    self.completionSelected = self.completionSelected + direction
+    if self.completionSelected < 1 then
+        self.completionSelected = #self.completionOptions
+    elseif self.completionSelected > #self.completionOptions then
+        self.completionSelected = 1
+    end
+end
+
+function CodeEditor:insertCompletion()
+    if not self.completionVisible or #self.completionOptions == 0 then return false end
+    
+    local completion = self.completionOptions[self.completionSelected]
+    local currentLine = self.lines[self.cursorY] or ""
+    
+    -- Replace the prefix with the completion
+    local beforePrefix = currentLine:sub(1, self.completionStartX - 1)
+    local afterCursor = currentLine:sub(self.cursorX)
+    local newLine = beforePrefix .. completion.text .. afterCursor
+    
+    self.lines[self.cursorY] = newLine
+    self.cursorX = self.completionStartX + #completion.text
+    
+    self:hideAutoCompletion()
+    return true
+end
+
+function CodeEditor:renderAutoCompletion()
+    if not self.completionVisible or #self.completionOptions == 0 then return end
+    
+    local absX, absY = self:getAbsolutePos()
+    local contentX = absX + (self.border and 1 or 0) + 4 -- Account for line numbers
+    local contentY = absY + (self.border and 1 or 0)
+    
+    -- Calculate completion popup position
+    local popupX = contentX + self.completionStartX - self.scrollX - 1
+    local popupY = contentY + self.completionStartY - self.scrollY
+    
+    -- Calculate popup dimensions
+    local maxWidth = math.min(self.maxCompletionWidth, 40)
+    local maxHeight = math.min(#self.completionOptions, self.maxCompletionHeight)
+    
+    -- Calculate actual content width based on longest option
+    local contentWidth = 0
+    for i = 1, #self.completionOptions do
+        contentWidth = math.max(contentWidth, #self.completionOptions[i].text)
+    end
+    contentWidth = math.min(contentWidth + 2, maxWidth) -- Add padding
+    
+    -- Calculate total dimensions including border
+    local totalWidth = self.completionBorder and (contentWidth + 2) or contentWidth
+    local totalHeight = self.completionBorder and (maxHeight + 2) or maxHeight
+    
+    -- Adjust if popup would go off screen
+    local termWidth, termHeight = term.getSize()
+    
+    if popupX + totalWidth > termWidth then
+        popupX = termWidth - totalWidth
+    end
+    if popupY + totalHeight > termHeight then
+        popupY = popupY - totalHeight - 1
+    end
+    
+    -- Ensure popup is within bounds
+    popupX = math.max(1, popupX)
+    popupY = math.max(1, popupY)
+    
+    if self.completionBorder then
+        -- Draw border using drawCharBorder
+        drawCharBorder(
+            popupX, popupY,
+            totalWidth, totalHeight,
+            self.completionBorderColor,
+            self.completionBgColor
+        )
+        
+        -- Draw completion options inside border
+        local innerX = popupX + 1
+        local innerY = popupY + 1
+        
+        for i = 1, maxHeight do
+            if i <= #self.completionOptions then
+                local option = self.completionOptions[i]
+                local isSelected = (i == self.completionSelected)
+                
+                term.setCursorPos(innerX, innerY + i - 1)
+                
+                if isSelected then
+                    term.setBackgroundColor(self.completionSelectedBgColor)
+                    term.setTextColor(self.completionSelectedTextColor)
+                else
+                    term.setBackgroundColor(self.completionBgColor)
+                    term.setTextColor(self.completionTextColor)
+                end
+                
+                -- Truncate text if too long
+                local displayText = option.text
+                local availableWidth = contentWidth - 2
+                if #displayText > availableWidth then
+                    displayText = displayText:sub(1, availableWidth - 3) .. "..."
+                end
+                
+                term.write(" " .. displayText .. string.rep(" ", availableWidth - #displayText))
+            end
+        end
+    else
+        -- Draw without border
+        for i = 1, maxHeight do
+            if i <= #self.completionOptions then
+                local option = self.completionOptions[i]
+                local isSelected = (i == self.completionSelected)
+                
+                term.setCursorPos(popupX, popupY + i - 1)
+                
+                if isSelected then
+                    term.setBackgroundColor(self.completionSelectedBgColor)
+                    term.setTextColor(self.completionSelectedTextColor)
+                else
+                    term.setBackgroundColor(self.completionBgColor)
+                    term.setTextColor(self.completionTextColor)
+                end
+                
+                -- Truncate text if too long
+                local displayText = option.text
+                if #displayText > contentWidth - 2 then
+                    displayText = displayText:sub(1, contentWidth - 5) .. "..."
+                end
+                
+                term.write(" " .. displayText .. string.rep(" ", contentWidth - #displayText - 1))
+            end
+        end
+    end
+end
+
+-- Key handling for auto-completion
+function CodeEditor:handleKey(key)
+    -- Handle auto-completion navigation
+    if self.completionVisible then
+        if key == keys.up then
+            self:selectCompletion(-1)
+            return true
+        elseif key == keys.down then
+            self:selectCompletion(1)
+            return true
+        elseif key == keys.enter or key == keys.tab then
+            return self:insertCompletion()
+        elseif key == keys.escape then
+            self:hideAutoCompletion()
+            return true
+        end
+    end
+    
+    -- Handle special auto-completion triggers
+    -- Try both space+ctrl and just F1 as alternative trigger
+    if (key == keys.space and term.current().isColor and term.current().isColor()) or key == keys.f1 then
+        self:showAutoCompletion()
+        return true
+    end
+    
+    -- Call parent handler
+    local result = RichTextBox.handleKey(self, key)
+    
+    -- Hide completion on navigation keys (but not if we just handled completion)
+    if not self.completionVisible and (key == keys.left or key == keys.right or 
+                                     key == keys.up or key == keys.down or
+                                     key == keys.home or key == keys["end"] or
+                                     key == keys.pageUp or key == keys.pageDown) then
+        self:hideAutoCompletion()
+    elseif key == keys.backspace or key == keys.delete then
+        -- Trigger completion after deletion to update suggestions
+        if self.autoComplete then
+            self:showAutoCompletion()
+        end
+    end
+    
+    return result
+end
+
+function CodeEditor:handleChar(char)
+    -- Call parent handler first
+    local result = RichTextBox.handleChar(self, char)
+    
+    -- Show auto-completion for word characters
+    if self.autoComplete and char:match("[%w_]") then
+        -- Trigger completion immediately after character insertion
+        self:showAutoCompletion()
+    elseif char == "." then
+        -- Show completion for method calls
+        self:showAutoCompletion()
+    else
+        -- Hide completion for non-word characters (except dot)
+        self:hideAutoCompletion()
+    end
+    
+    return result
+end
+
+function CodeEditor:handleEvent(event, ...)
+    -- Handle our custom completion event (removed for simplicity)
+    -- Call parent handler if it exists
+    if RichTextBox.handleEvent then
+        return RichTextBox.handleEvent(self, event, ...)
+    end
+    
+    return false
+end
+
+-- API for adding custom completion sources
+function CodeEditor:addCompletionSource(sourceName, items)
+    if not self.completionSources then
+        self.completionSources = {}
+    end
+    self.completionSources[sourceName] = items
+end
+
+function CodeEditor:removeCompletionSource(sourceName)
+    if self.completionSources then
+        self.completionSources[sourceName] = nil
+    end
+end
+
+function CodeEditor:getCompletionSources()
+    return self.completionSources or {}
+end
+
+-- Method to manually trigger auto-completion
+function CodeEditor:triggerAutoCompletion()
+    self:showAutoCompletion()
+end
+
+-- Method to check if auto-completion is currently visible
+function CodeEditor:isAutoCompletionVisible()
+    return self.completionVisible or false
 end
 
 -- Accordion Widget (Collapsible sections)
@@ -7240,6 +7674,14 @@ function PixelUI.codeEditor(props)
     if rootContainer then
         rootContainer:addChild(editor)
     end
+    
+    -- Add any custom completion sources
+    if props.completionSources then
+        for sourceName, items in pairs(props.completionSources) do
+            editor:addCompletionSource(sourceName, items)
+        end
+    end
+    
     return editor
 end
 
