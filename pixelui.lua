@@ -5495,6 +5495,33 @@ function RichTextBox:render()
         end
     end
     
+    -- Draw scrollbar if content is larger than visible area
+    if #self.lines > contentHeight then
+        local scrollbarX = absX + self.width - 1
+        local scrollbarHeight = contentHeight
+        local maxScrollY = math.max(0, #self.lines - contentHeight)
+        
+        -- Draw scrollbar background
+        term.setBackgroundColor(colors.lightGray)
+        for i = 0, scrollbarHeight - 1 do
+            term.setCursorPos(scrollbarX, contentY + i)
+            term.write(" ")
+        end
+        
+        -- Draw scrollbar thumb
+        if maxScrollY > 0 then
+            local thumbHeight = math.max(1, math.floor(scrollbarHeight * contentHeight / #self.lines))
+            local thumbPos = math.floor(scrollbarHeight * self.scrollY / maxScrollY)
+            thumbPos = math.min(thumbPos, scrollbarHeight - thumbHeight)
+            
+            term.setBackgroundColor(colors.gray)
+            for i = 0, thumbHeight - 1 do
+                term.setCursorPos(scrollbarX, contentY + thumbPos + i)
+                term.write(" ")
+            end
+        end
+    end
+    
     term.setBackgroundColor(colors.black)
 end
 
@@ -5594,7 +5621,25 @@ function RichTextBox:onClick(relX, relY)
     
     local contentX = (self.border and 1 or 0) + (self.showLineNumbers and 4 or 0)
     local contentY = (self.border and 1 or 0)
+    local contentHeight = self.height - (self.border and 2 or 0)
+    local scrollbarX = self.width - 1
     
+    -- Check if clicked on scrollbar
+    if relX == scrollbarX and #self.lines > contentHeight then
+        local maxScrollY = math.max(0, #self.lines - contentHeight)
+        local clickPosY = relY - contentY
+        
+        if clickPosY >= 0 and clickPosY < contentHeight then
+            -- Calculate scroll position based on click position
+            local scrollRatio = clickPosY / contentHeight
+            self.scrollY = math.floor(scrollRatio * maxScrollY)
+            self.scrollY = math.max(0, math.min(maxScrollY, self.scrollY))
+        end
+        
+        return true
+    end
+    
+    -- Handle content area click
     if relX > contentX and relY > contentY then
         local clickX = relX - contentX + self.scrollX
         local clickY = relY - contentY + self.scrollY
@@ -5615,6 +5660,13 @@ end
 
 function RichTextBox:handleKey(key)
     if not self.enabled or not self.focused or self.readonly then return false end
+    
+    local contentHeight = self.height - (self.border and 2 or 0)
+    local contentWidth = self.width - (self.border and 2 or 0) - (self.showLineNumbers and 4 or 0)
+    
+    -- Check for Ctrl key combinations
+    local isCtrlHeld = false
+    -- Note: In CC:Tweaked, we can't easily detect Ctrl state, so we'll use different key combinations
     
     if key == keys.up then
         if self.cursorY > 1 then
@@ -5654,6 +5706,53 @@ function RichTextBox:handleKey(key)
             self:ensureCursorVisible()
         end
         return true
+    elseif key == keys.pageUp then
+        self.cursorY = math.max(1, self.cursorY - contentHeight)
+        local line = self.lines[self.cursorY] or ""
+        self.cursorX = math.min(self.cursorX, #line + 1)
+        self:ensureCursorVisible()
+        return true
+    elseif key == keys.pageDown then
+        self.cursorY = math.min(#self.lines, self.cursorY + contentHeight)
+        local line = self.lines[self.cursorY] or ""
+        self.cursorX = math.min(self.cursorX, #line + 1)
+        self:ensureCursorVisible()
+        return true
+    elseif key == keys.home then
+        self.cursorX = 1
+        self:ensureCursorVisible()
+        return true
+    elseif key == keys["end"] then
+        local line = self.lines[self.cursorY] or ""
+        self.cursorX = #line + 1
+        self:ensureCursorVisible()
+        return true
+    elseif key == keys.leftCtrl or key == keys.rightCtrl then
+        -- Store ctrl state for next key press combinations
+        -- Since CC:Tweaked doesn't have easy multi-key detection, we'll add alternative shortcuts
+        return false -- Let other handlers process this
+    elseif key == keys.f2 then
+        -- F2: Go to top of document
+        self.cursorY = 1
+        self.cursorX = 1
+        self:ensureCursorVisible()
+        return true
+    elseif key == keys.f3 then
+        -- F3: Go to bottom of document
+        self.cursorY = #self.lines
+        local line = self.lines[self.cursorY] or ""
+        self.cursorX = #line + 1
+        self:ensureCursorVisible()
+        return true
+    elseif key == keys.f4 then
+        -- F4: Scroll left (horizontal)
+        self.scrollX = math.max(0, self.scrollX - 5)
+        return true
+    elseif key == keys.f5 then
+        -- F5: Scroll right (horizontal)
+        local maxScrollX = math.max(0, self:getMaxLineLength() - contentWidth)
+        self.scrollX = math.min(maxScrollX, self.scrollX + 5)
+        return true
     elseif key == keys.enter then
         self:insertText("\n")
         return true
@@ -5681,6 +5780,65 @@ function RichTextBox:handleKey(key)
     end
     
     return false
+end
+
+function RichTextBox:handleScroll(x, y, direction)
+    if not self.enabled or not self.visible then return false end
+    
+    local absX, absY = self:getAbsolutePos()
+    
+    -- Check if scroll event is within widget bounds
+    if x >= absX and x < absX + self.width and y >= absY and y < absY + self.height then
+        local scrollAmount = 3 -- Number of lines to scroll per wheel tick
+        local contentHeight = self.height - (self.border and 2 or 0)
+        local maxScrollY = math.max(0, #self.lines - contentHeight)
+        
+        if direction == -1 then -- Scroll up
+            self.scrollY = math.max(0, self.scrollY - scrollAmount)
+        elseif direction == 1 then -- Scroll down
+            self.scrollY = math.min(maxScrollY, self.scrollY + scrollAmount)
+        end
+        
+        return true
+    end
+    
+    return false
+end
+
+function RichTextBox:scrollToLine(lineNumber)
+    if lineNumber < 1 then lineNumber = 1 end
+    if lineNumber > #self.lines then lineNumber = #self.lines end
+    
+    local contentHeight = self.height - (self.border and 2 or 0)
+    self.scrollY = math.max(0, lineNumber - math.floor(contentHeight / 2))
+    
+    local maxScrollY = math.max(0, #self.lines - contentHeight)
+    self.scrollY = math.min(self.scrollY, maxScrollY)
+end
+
+function RichTextBox:scrollBy(lines)
+    local contentHeight = self.height - (self.border and 2 or 0)
+    local maxScrollY = math.max(0, #self.lines - contentHeight)
+    
+    self.scrollY = math.max(0, math.min(maxScrollY, self.scrollY + lines))
+end
+
+function RichTextBox:scrollToTop()
+    self.scrollY = 0
+end
+
+function RichTextBox:scrollToBottom()
+    local contentHeight = self.height - (self.border and 2 or 0)
+    self.scrollY = math.max(0, #self.lines - contentHeight)
+end
+
+function RichTextBox:getMaxLineLength()
+    local maxLength = 0
+    for i = 1, #self.lines do
+        local line = self.lines[i] or ""
+        maxLength = math.max(maxLength, #line)
+    end
+    return maxLength
 end
 
 function RichTextBox:handleChar(char)
