@@ -6007,9 +6007,6 @@ function CodeEditor:render()
     end
     
     term.setBackgroundColor(colors.black)
-    
-    -- Render auto-completion popup
-    self:renderAutoCompletion()
 end
 
 function CodeEditor:renderSyntaxHighlightedLine(line, x, y)
@@ -6095,8 +6092,6 @@ end
 function CodeEditor:showAutoCompletion()
     if not self.autoComplete then return end
     
-    -- Debug: Always show something for testing
-    print("Auto-completion triggered!")
     
     local currentLine = self.lines[self.cursorY] or ""
     local beforeCursor = currentLine:sub(1, self.cursorX - 1)
@@ -6112,7 +6107,6 @@ function CodeEditor:showAutoCompletion()
     end
     
     self.completionPrefix = beforeCursor:sub(wordStart)
-    print("Completion prefix: '" .. self.completionPrefix .. "'")
     
     -- Always show at least some basic completions for testing
     self.completionOptions = {}
@@ -6153,8 +6147,6 @@ function CodeEditor:showAutoCompletion()
     -- Add variables from current scope
     self:addVariableCompletions()
     
-    print("Total completion options: " .. #self.completionOptions)
-    
     -- Sort by relevance (exact prefix match first, then alphabetical)
     table.sort(self.completionOptions, function(a, b)
         local aExact = a.text:sub(1, #self.completionPrefix):lower() == self.completionPrefix:lower()
@@ -6171,10 +6163,8 @@ function CodeEditor:showAutoCompletion()
         self.completionSelected = 1
         self.completionStartX = wordStart
         self.completionStartY = self.cursorY
-        print("Showing completion popup with " .. #self.completionOptions .. " options")
     else
         self:hideAutoCompletion()
-        print("No completions found, hiding popup")
     end
 end
 
@@ -6310,8 +6300,8 @@ function CodeEditor:renderAutoCompletion()
         drawCharBorder(
             popupX, popupY,
             totalWidth, totalHeight,
-            self.completionBorderColor,
-            self.completionBgColor
+            self.completionBorderColor or colors.gray,
+            self.completionBgColor or colors.lightGray
         )
         
         -- Draw completion options inside border
@@ -6326,21 +6316,33 @@ function CodeEditor:renderAutoCompletion()
                 term.setCursorPos(innerX, innerY + i - 1)
                 
                 if isSelected then
-                    term.setBackgroundColor(self.completionSelectedBgColor)
-                    term.setTextColor(self.completionSelectedTextColor)
+                    term.setBackgroundColor(self.completionSelectedBgColor or colors.blue)
+                    term.setTextColor(self.completionSelectedTextColor or colors.white)
                 else
-                    term.setBackgroundColor(self.completionBgColor)
-                    term.setTextColor(self.completionTextColor)
+                    term.setBackgroundColor(self.completionBgColor or colors.lightGray)
+                    term.setTextColor(self.completionTextColor or colors.black)
                 end
                 
-                -- Truncate text if too long
+                -- Truncate text if too long and ensure proper padding
                 local displayText = option.text
                 local availableWidth = contentWidth - 2
                 if #displayText > availableWidth then
                     displayText = displayText:sub(1, availableWidth - 3) .. "..."
                 end
                 
-                term.write(" " .. displayText .. string.rep(" ", availableWidth - #displayText))
+                -- Write text with proper spacing to fill the entire width
+                local paddedText = " " .. displayText
+                local remainingSpace = availableWidth - #displayText
+                if remainingSpace > 0 then
+                    paddedText = paddedText .. string.rep(" ", remainingSpace)
+                end
+                
+                term.write(paddedText)
+            else
+                -- Fill empty rows with background color
+                term.setCursorPos(innerX, innerY + i - 1)
+                term.setBackgroundColor(self.completionBgColor or colors.lightGray)
+                term.write(string.rep(" ", contentWidth - 2))
             end
         end
     else
@@ -6353,11 +6355,11 @@ function CodeEditor:renderAutoCompletion()
                 term.setCursorPos(popupX, popupY + i - 1)
                 
                 if isSelected then
-                    term.setBackgroundColor(self.completionSelectedBgColor)
-                    term.setTextColor(self.completionSelectedTextColor)
+                    term.setBackgroundColor(self.completionSelectedBgColor or colors.blue)
+                    term.setTextColor(self.completionSelectedTextColor or colors.white)
                 else
-                    term.setBackgroundColor(self.completionBgColor)
-                    term.setTextColor(self.completionTextColor)
+                    term.setBackgroundColor(self.completionBgColor or colors.lightGray)
+                    term.setTextColor(self.completionTextColor or colors.black)
                 end
                 
                 -- Truncate text if too long
@@ -6366,7 +6368,19 @@ function CodeEditor:renderAutoCompletion()
                     displayText = displayText:sub(1, contentWidth - 5) .. "..."
                 end
                 
-                term.write(" " .. displayText .. string.rep(" ", contentWidth - #displayText - 1))
+                -- Write text with proper spacing
+                local paddedText = " " .. displayText
+                local remainingSpace = contentWidth - #displayText - 1
+                if remainingSpace > 0 then
+                    paddedText = paddedText .. string.rep(" ", remainingSpace)
+                end
+                
+                term.write(paddedText)
+            else
+                -- Fill empty rows
+                term.setCursorPos(popupX, popupY + i - 1)
+                term.setBackgroundColor(self.completionBgColor or colors.lightGray)
+                term.write(string.rep(" ", contentWidth))
             end
         end
     end
@@ -7930,6 +7944,30 @@ function PixelUI.render()
             widget:draw()
         end
     end
+    
+    -- Render auto-completion popups on top of everything (including toasts)
+    local function renderAutoCompletions(widgetList)
+        for _, widget in ipairs(widgetList) do
+            if widget.__index == CodeEditor and widget.visible ~= false and widget.completionVisible then
+                widget:renderAutoCompletion()
+            end
+            -- Recursively check children
+            if widget.children then
+                renderAutoCompletions(widget.children)
+            end
+        end
+    end
+    
+    -- Render auto-completions from all widgets (including nested ones)
+    renderAutoCompletions(widgets)
+    
+    -- Also check modal and root container
+    if activeModal and activeModal.children then
+        renderAutoCompletions(activeModal.children)
+    end
+    if rootContainer and rootContainer.children then
+        renderAutoCompletions(rootContainer.children)
+    end
 end
 
 function PixelUI.clear()
@@ -9445,8 +9483,6 @@ function PluginManager:loadPluginsFromDirectory(dirPath)
                     path = fullPath,
                     plugin = result
                 })
-            else
-                print("Failed to load plugin " .. file .. ": " .. result)
             end
         end
     end
