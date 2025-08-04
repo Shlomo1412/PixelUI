@@ -6449,11 +6449,11 @@ function CodeEditor:handleKey(key)
                                      key == keys.home or key == keys["end"] or
                                      key == keys.pageUp or key == keys.pageDown) then
         self:hideAutoCompletion()
-    elseif key == keys.backspace or key == keys.delete then
-        -- Trigger completion after deletion to update suggestions
-        if self.autoComplete then
-            self:showAutoCompletion()
-        end
+    -- Disable auto-completion trigger on backspace/delete to avoid unwanted popups
+    -- elseif key == keys.backspace or key == keys.delete then
+    --     if self.autoComplete then
+    --         self:showAutoCompletion()
+    --     end
     end
     
     return result
