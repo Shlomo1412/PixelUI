@@ -3970,7 +3970,7 @@ demo:createFrameUI()
 PixelUI.run({
     onKey = function(key)
         if key == keys.q then
-            return false -- Quit
+            --return false -- Quit
         elseif key == keys.left then
             demo:prevFrame()
         elseif key == keys.right then

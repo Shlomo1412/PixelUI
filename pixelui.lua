@@ -5884,6 +5884,8 @@ function CodeEditor:new(props)
     editor.completionPrefix = ""
     editor.completionOptions = {}
     editor.completionSelected = 1
+    editor.completionScroll = 1  -- Index of first option displayed in popup
+    editor.completionScroll = 1  -- First visible option index in popup
     editor.completionStartX = 0
     editor.completionStartY = 0
     editor.maxCompletionHeight = props.maxCompletionHeight or 8
@@ -6161,6 +6163,7 @@ function CodeEditor:showAutoCompletion()
     if #self.completionOptions > 0 then
         self.completionVisible = true
         self.completionSelected = 1
+        self.completionScroll = 1
         self.completionStartX = wordStart
         self.completionStartY = self.cursorY
     else
@@ -6230,10 +6233,18 @@ function CodeEditor:selectCompletion(direction)
     if not self.completionVisible or #self.completionOptions == 0 then return end
     
     self.completionSelected = self.completionSelected + direction
+    local total = #self.completionOptions
     if self.completionSelected < 1 then
-        self.completionSelected = #self.completionOptions
-    elseif self.completionSelected > #self.completionOptions then
+        self.completionSelected = total
+    elseif self.completionSelected > total then
         self.completionSelected = 1
+    end
+    -- Adjust scroll so selected is visible
+    local maxHeight = math.min(total, self.maxCompletionHeight)
+    if self.completionSelected < self.completionScroll then
+        self.completionScroll = self.completionSelected
+    elseif self.completionSelected >= self.completionScroll + maxHeight then
+        self.completionScroll = self.completionSelected - maxHeight + 1
     end
 end
 
@@ -6268,7 +6279,8 @@ function CodeEditor:renderAutoCompletion()
     
     -- Calculate popup dimensions
     local maxWidth = math.min(self.maxCompletionWidth, 40)
-    local maxHeight = math.min(#self.completionOptions, self.maxCompletionHeight)
+    local total = #self.completionOptions
+    local maxHeight = math.min(total, self.maxCompletionHeight)
     
     -- Calculate actual content width based on longest option
     local contentWidth = 0
@@ -6309,9 +6321,10 @@ function CodeEditor:renderAutoCompletion()
         local innerY = popupY + 1
         
         for i = 1, maxHeight do
-            if i <= #self.completionOptions then
-                local option = self.completionOptions[i]
-                local isSelected = (i == self.completionSelected)
+            local idx = self.completionScroll + i - 1
+            if idx <= total then
+                local option = self.completionOptions[idx]
+                local isSelected = (idx == self.completionSelected)
                 
                 term.setCursorPos(innerX, innerY + i - 1)
                 
@@ -6323,26 +6336,42 @@ function CodeEditor:renderAutoCompletion()
                     term.setTextColor(self.completionTextColor or colors.black)
                 end
                 
-                -- Truncate text if too long and ensure proper padding
+                -- Truncate text if too long and fully pad to fill interior width
                 local displayText = option.text
                 local availableWidth = contentWidth - 2
                 if #displayText > availableWidth then
                     displayText = displayText:sub(1, availableWidth - 3) .. "..."
                 end
-                
-                -- Write text with proper spacing to fill the entire width
-                local paddedText = " " .. displayText
-                local remainingSpace = availableWidth - #displayText
-                if remainingSpace > 0 then
-                    paddedText = paddedText .. string.rep(" ", remainingSpace)
-                end
-                
+                -- Build padded text with one space margin on both sides to match contentWidth
+                -- Pad with one space on the left and fill the rest
+                local paddedText = " " .. displayText .. string.rep(" ", availableWidth - #displayText)
                 term.write(paddedText)
+                -- Draw scrollbar cell at the right interior column
+                local scrollbarX = popupX + totalWidth - 2
+                local rowY = innerY + i - 1
+                term.setCursorPos(scrollbarX, rowY)
+                if total > maxHeight then
+                    local maxScroll = total - maxHeight
+                    local thumbHeight = math.max(1, math.floor(maxHeight * maxHeight / total))
+                    local thumbPos = math.floor(((self.completionScroll - 1) / maxScroll) * (maxHeight - thumbHeight))
+                    local isThumb = (i - 1 >= thumbPos and i - 1 < thumbPos + thumbHeight)
+                    term.setBackgroundColor(isThumb and (self.completionSelectedBgColor or colors.blue)
+                        or (self.completionBgColor or colors.lightGray))
+                else
+                    term.setBackgroundColor(self.completionBgColor or colors.lightGray)
+                end
+                term.write(" ")
             else
-                -- Fill empty rows with background color
+                -- Fill empty rows completely within the interior
                 term.setCursorPos(innerX, innerY + i - 1)
                 term.setBackgroundColor(self.completionBgColor or colors.lightGray)
-                term.write(string.rep(" ", contentWidth - 2))
+                term.write(string.rep(" ", contentWidth))
+                -- Draw empty scrollbar cell
+                local scrollbarX = popupX + totalWidth - 2
+                local rowY = innerY + i - 1
+                term.setCursorPos(scrollbarX, rowY)
+                term.setBackgroundColor(self.completionBgColor or colors.lightGray)
+                term.write(" ")
             end
         end
     else
@@ -6428,6 +6457,41 @@ function CodeEditor:handleKey(key)
     end
     
     return result
+end
+
+-- Mouse-wheel scroll for autocomplete popup
+function CodeEditor:handleScroll(x, y, direction)
+    if not self.completionVisible or #self.completionOptions == 0 then return false end
+    -- Compute popup position and size (same logic as renderAutoCompletion)
+    local absX, absY = self:getAbsolutePos()
+    local contentX = absX + (self.border and 1 or 0) + 4
+    local contentY = absY + (self.border and 1 or 0)
+    local maxHeight = math.min(#self.completionOptions, self.maxCompletionHeight)
+    local contentWidth = 0
+    for i, opt in ipairs(self.completionOptions) do contentWidth = math.max(contentWidth, #opt.text) end
+    local totalWidth = self.completionBorder and (math.min(contentWidth + 2, self.maxCompletionWidth) + 2)
+        or math.min(contentWidth + 2, self.maxCompletionWidth)
+    local totalHeight = self.completionBorder and (maxHeight + 2) or maxHeight
+    local popupX = contentX + self.completionStartX - self.scrollX - 1
+    local popupY = contentY + self.completionStartY - self.scrollY
+    -- Adjust bounds
+    local termW, termH = term.getSize()
+    if popupX + totalWidth > termW then popupX = termW - totalWidth end
+    if popupY + totalHeight > termH then popupY = popupY - totalHeight - 1 end
+    popupX = math.max(1, popupX); popupY = math.max(1, popupY)
+    -- Check if within popup
+    if x >= popupX and x < popupX + totalWidth and y >= popupY and y < popupY + totalHeight then
+        -- Scroll the list by one
+        local total = #self.completionOptions
+        local maxScroll = total - maxHeight
+        if direction == -1 then -- wheel up
+            self.completionScroll = math.max(1, self.completionScroll - 1)
+        elseif direction == 1 then -- wheel down
+            self.completionScroll = math.min(math.max(1, maxScroll + 1), self.completionScroll + 1)
+        end
+        return true
+    end
+    return false
 end
 
 function CodeEditor:handleChar(char)
