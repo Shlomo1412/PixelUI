@@ -661,7 +661,7 @@ function Label:render()
         term.setBackgroundColor(self.background)
     end
     
-    local text = (self.text or ""):sub(1, self.width)
+    local text = tostring(self.text or ""):sub(1, self.width)
     local startX = absX
     
     if self.align == "center" then

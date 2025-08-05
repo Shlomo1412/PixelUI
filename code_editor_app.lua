@@ -398,11 +398,58 @@ function showEditMenu()
 end
 
 function showViewMenu()
-    PixelUI.showToast("View menu - File Explorer (F2), Line Numbers", "Info", "info", 3000)
-    -- Hide toolbar after showing view menu
-    if app.toolbarVisible then
-        toggleToolbar()
-    end
+    local menu = PixelUI.modal({
+        x = 25,
+        y = 5,
+        width = 35,
+        height = 12,
+        title = "View Menu",
+        closable = true,
+        onClose = function()
+            if app.toolbarVisible then
+                toggleToolbar()
+            end
+        end
+    })
+    
+    local explorerBtn = PixelUI.button({
+        x = 2, y = 2, width = 31, height = 2,
+        text = "File Explorer (F2)",
+        isChildWidget = true,
+        onClick = function()
+            toggleFileExplorer()
+            menu:close()
+        end
+    })
+    
+    local lineNumbersBtn = PixelUI.button({
+        x = 2, y = 5, width = 31, height = 2,
+        text = "Toggle Line Numbers",
+        isChildWidget = true,
+        onClick = function()
+            app.editor.showLineNumbers = not app.editor.showLineNumbers
+            PixelUI.showToast("Line numbers " .. (app.editor.showLineNumbers and "enabled" or "disabled"), "Info", "info", 2000)
+            menu:close()
+        end
+    })
+    
+    local programRunnerBtn = PixelUI.button({
+        x = 2, y = 8, width = 31, height = 2,
+        text = "Program Runner (F5)",
+        isChildWidget = true,
+        onClick = function()
+            if app.currentFile then
+                runProgramFullScreen()
+            else
+                PixelUI.showToast("Save file first to run", "Warning", "warning", 2000)
+            end
+            menu:close()
+        end
+    })
+    
+    menu:addChild(explorerBtn)
+    menu:addChild(lineNumbersBtn)
+    menu:addChild(programRunnerBtn)
 end
 
 function newFile()
@@ -430,7 +477,7 @@ function openFile()
         height = 20,
         title = "Open File",
         fileTypes = {".lua", ".txt", ".md", ".json"},
-        onSelect = function(filepath)
+        onSelect = function(_, filepath)
             if fs.exists(filepath) and not fs.isDir(filepath) then
                 local file = fs.open(filepath, "r")
                 if file then
@@ -590,13 +637,148 @@ function runCurrentFile()
         if app.unsavedChanges then
             saveFile()
         end
-        -- Run in new thread to avoid blocking UI
-        PixelUI.spawnThread(function()
-            shell.run(app.currentFile)
-        end)
+        
+        -- Run the script in full screen mode
+        runProgramFullScreen()
     else
         PixelUI.showToast("Save as .lua file first to run", "Warning", "warning", 3000)
     end
+end
+
+function runProgramFullScreen()
+    if not app.currentFile then
+        PixelUI.showToast("No file to run", "Warning", "warning", 2000)
+        return
+    end
+    
+    local termWidth, termHeight = term.getSize()
+    
+    -- Clear the screen
+    term.setBackgroundColor(colors.black)
+    term.clear()
+    
+    -- Create a full-screen program widget
+    local programWidget = PixelUI.program({
+        x = 1,
+        y = 1,
+        width = termWidth,
+        height = termHeight,
+        path = app.currentFile,
+        environment = {
+            EDITOR_FILE = app.currentFile,
+            EDITOR_MODE = "run"
+        },
+        onError = function(prog, error, traceback)
+            -- Show error and return to editor
+            term.setBackgroundColor(colors.black)
+            term.clear()
+            term.setCursorPos(1, 1)
+            term.setTextColor(colors.red)
+            print("Program Error:")
+            print(error)
+            if traceback and traceback ~= "" then
+                print("\nTraceback:")
+                print(traceback)
+            end
+            term.setTextColor(colors.white)
+            print("\nPress any key to return to editor...")
+            os.pullEvent("key")
+            
+            -- Return to editor
+            returnToEditor()
+            return false -- Don't suppress error display
+        end,
+        onDone = function(prog, success, result)
+            -- Program finished, return to editor
+            term.setBackgroundColor(colors.black)
+            term.clear()
+            term.setCursorPos(1, 1)
+            
+            if success then
+                term.setTextColor(colors.green)
+                print("Program completed successfully")
+                if result then
+                    print("Result:", tostring(result))
+                end
+            else
+                term.setTextColor(colors.red)
+                print("Program failed")
+                if result then
+                    print("Error:", tostring(result))
+                end
+            end
+            
+            local runtime = prog:getRuntime()
+            term.setTextColor(colors.yellow)
+            print(string.format("Runtime: %.2f seconds", runtime))
+            
+            term.setTextColor(colors.white)
+            print("\nPress any key to return to editor...")
+            os.pullEvent("key")
+            
+            -- Return to editor
+            returnToEditor()
+        end
+    })
+    
+    -- Execute the program
+    local ok, result = programWidget:execute(app.currentFile)
+    if not ok then
+        -- Failed to start, show error and return to editor
+        term.setBackgroundColor(colors.black)
+        term.clear()
+        term.setCursorPos(1, 1)
+        term.setTextColor(colors.red)
+        print("Failed to start program:")
+        print(result)
+        term.setTextColor(colors.white)
+        print("\nPress any key to return to editor...")
+        os.pullEvent("key")
+        
+        returnToEditor()
+        return
+    end
+    
+    -- Run a simple event loop to handle the program
+    while programWidget:isRunning() do
+        local event, p1, p2, p3, p4, p5 = os.pullEvent()
+        
+        -- Handle terminate event to allow Ctrl+T to stop the program
+        if event == "terminate" then
+            programWidget:stop()
+            break
+        end
+        
+        -- Forward events to the program
+        programWidget:sendEvent(event, p1, p2, p3, p4, p5)
+    end
+    
+    -- If we get here and the program is still running, it means we broke out of the loop
+    if programWidget:isRunning() then
+        programWidget:stop()
+        
+        term.setBackgroundColor(colors.black)
+        term.clear()
+        term.setCursorPos(1, 1)
+        term.setTextColor(colors.yellow)
+        print("Program terminated by user")
+        term.setTextColor(colors.white)
+        print("\nPress any key to return to editor...")
+        os.pullEvent("key")
+        
+        returnToEditor()
+    end
+end
+
+function returnToEditor()
+    -- Clear everything and restart the editor
+    term.setBackgroundColor(colors.black)
+    term.clear()
+    term.setCursorPos(1, 1)
+    
+    -- Reinitialize PixelUI and recreate the editor
+    PixelUI.clear()
+    createCodeEditor()
 end
 
 function showFindDialog()
@@ -627,7 +809,7 @@ Alt: Toggle toolbar
 F1: Show this help
 F2: Toggle file explorer
 F3: Find in file
-F5: Run current file
+F5: Run current file full-screen
 F10: New file (Ctrl+N)
 F11: Save file (Ctrl+S)
 F12: Open file (Ctrl+O)
@@ -645,7 +827,14 @@ Editor Features:
 - Line numbers
 - Auto-completion
 - Scrolling support
-- Multiple file types]],
+- Multiple file types
+
+Program Runner:
+- Runs Lua scripts in full-screen mode
+- Real-time program execution
+- Automatic return to editor on exit
+- Error handling with detailed output
+- Ctrl+T to terminate running programs]],
         textColor = colors.white,
         alignment = "left"
     })
