@@ -7094,6 +7094,501 @@ function StatusBar:clearSections()
     self.sections = {}
 end
 
+-- Program Widget (Runs external programs in a contained window)
+local Program = setmetatable({}, {__index = Widget})
+Program.__index = Program
+
+function Program:new(props)
+    local program = Widget.new(self, props)
+    program.path = props.path or ""
+    program.running = false
+    program.programInstance = nil
+    program.programWindow = nil
+    program.programCoroutine = nil
+    program.programFilter = nil
+    program.environmentVars = props.environment or {}
+    program.addEnvironment = props.addEnvironment ~= false -- default true
+    program.args = props.args or {}
+    
+    -- Callbacks
+    program.onError = props.onError -- function(program, error, traceback)
+    program.onDone = props.onDone -- function(program, success, result)
+    program.onOutput = props.onOutput -- function(program, text)
+    
+    -- Display properties
+    program.showOutput = props.showOutput ~= false -- default true
+    program.captureOutput = props.captureOutput ~= false -- default true
+    program.outputBuffer = {}
+    program.maxOutputLines = props.maxOutputLines or 1000
+    
+    -- Execution state
+    program.exitCode = nil
+    program.lastError = nil
+    program.startTime = nil
+    program.endTime = nil
+    
+    return program
+end
+
+-- Internal program management class
+local ProgramRunner = {}
+ProgramRunner.__index = ProgramRunner
+
+function ProgramRunner.new(programWidget, env, addEnvironment)
+    local self = setmetatable({}, ProgramRunner)
+    self.programWidget = programWidget
+    self.env = env or {}
+    self.args = {}
+    self.addEnvironment = addEnvironment == nil and true or addEnvironment
+    self.window = nil
+    self.coroutine = nil
+    self.filter = nil
+    return self
+end
+
+function ProgramRunner:setArgs(...)
+    self.args = {...}
+end
+
+function ProgramRunner:createShellEnv(dir)
+    local env = { shell = shell, multishell = multishell }
+    if package and require then
+        local newPackage = require("cc.require").make
+        env.require, env.package = newPackage(env, dir)
+    end
+    return env
+end
+
+function ProgramRunner:run(path, width, height)
+    -- Create window for the program
+    self.window = window.create(term.current(), 1, 1, width, height, false)
+    
+    -- Resolve program path
+    local resolvedPath = shell.resolveProgram(path) or (fs.exists(path) and path) or nil
+    if not resolvedPath then
+        if self.programWidget.onError then
+            self.programWidget.onError(self.programWidget, "Program not found: " .. path, "")
+        end
+        return false, "Program not found: " .. path
+    end
+    
+    if not fs.exists(resolvedPath) then
+        if self.programWidget.onError then
+            self.programWidget.onError(self.programWidget, "File not found: " .. resolvedPath, "")
+        end
+        return false, "File not found: " .. resolvedPath
+    end
+    
+    -- Read program content
+    local file = fs.open(resolvedPath, "r")
+    if not file then
+        if self.programWidget.onError then
+            self.programWidget.onError(self.programWidget, "Cannot read file: " .. resolvedPath, "")
+        end
+        return false, "Cannot read file: " .. resolvedPath
+    end
+    
+    local content = file.readAll()
+    file.close()
+    
+    if not content then
+        if self.programWidget.onError then
+            self.programWidget.onError(self.programWidget, "Empty or invalid file: " .. resolvedPath, "")
+        end
+        return false, "Empty or invalid file: " .. resolvedPath
+    end
+    
+    -- Set up environment
+    local env = setmetatable(self:createShellEnv(fs.getDir(resolvedPath)), { __index = _ENV })
+    env.term = self.window
+    env.term.current = term.current
+    env.term.redirect = term.redirect
+    env.term.native = function()
+        return self.window
+    end
+    
+    if self.addEnvironment then
+        for k, v in pairs(self.env) do
+            env[k] = v
+        end
+    else
+        env = self.env
+    end
+    
+    -- Create and start coroutine
+    self.coroutine = coroutine.create(function()
+        local program = load(content, "@/" .. resolvedPath, nil, env)
+        if program then
+            local result = program(table.unpack(self.args))
+            return result
+        else
+            error("Failed to load program")
+        end
+    end)
+    
+    local current = term.current()
+    term.redirect(self.window)
+    local ok, result = coroutine.resume(self.coroutine)
+    term.redirect(current)
+    
+    if not ok then
+        local doneCallback = self.programWidget.onDone
+        if doneCallback then
+            doneCallback(self.programWidget, ok, result)
+        end
+        
+        local errorCallback = self.programWidget.onError
+        if errorCallback then
+            local trace = debug.traceback(self.coroutine, result)
+            local suppressError = errorCallback(self.programWidget, result, trace:gsub(result, ""))
+            if suppressError == false then
+                self.filter = nil
+                return ok, result
+            end
+        end
+        
+        self.programWidget.lastError = result
+        self.programWidget.exitCode = -1
+    end
+    
+    if coroutine.status(self.coroutine) == "dead" then
+        self.programWidget.running = false
+        self.programWidget.programInstance = nil
+        local doneCallback = self.programWidget.onDone
+        if doneCallback then
+            doneCallback(self.programWidget, ok, result)
+        end
+    end
+    
+    return ok, result
+end
+
+function ProgramRunner:resize(width, height)
+    if self.window then
+        self.window.reposition(1, 1, width, height)
+        self:resume("term_resize", width, height)
+    end
+end
+
+function ProgramRunner:resume(event, ...)
+    local args = {...}
+    
+    -- Adjust mouse coordinates to be relative to the program window
+    if event:find("mouse_") then
+        args[2], args[3] = args[2] - self.programWidget.x + 1, args[3] - self.programWidget.y + 1
+    end
+    
+    if self.coroutine == nil or coroutine.status(self.coroutine) == "dead" then
+        self.programWidget.running = false
+        return
+    end
+    
+    if self.filter ~= nil then
+        if event ~= self.filter then
+            return
+        end
+        self.filter = nil
+    end
+    
+    local current = term.current()
+    term.redirect(self.window)
+    local ok, result = coroutine.resume(self.coroutine, event, table.unpack(args))
+    term.redirect(current)
+    
+    if ok then
+        self.filter = result
+        if coroutine.status(self.coroutine) == "dead" then
+            self.programWidget.running = false
+            self.programWidget.programInstance = nil
+            local doneCallback = self.programWidget.onDone
+            if doneCallback then
+                doneCallback(self.programWidget, ok, result)
+            end
+        end
+    else
+        local doneCallback = self.programWidget.onDone
+        if doneCallback then
+            doneCallback(self.programWidget, ok, result)
+        end
+        
+        local errorCallback = self.programWidget.onError
+        if errorCallback then
+            local trace = debug.traceback(self.coroutine, result)
+            trace = trace == nil and "" or trace
+            result = result or "Unknown error"
+            local suppressError = errorCallback(self.programWidget, result, trace:gsub(result, ""))
+            if suppressError == false then
+                self.filter = nil
+                return ok, result
+            end
+        end
+        
+        self.programWidget.lastError = result
+        self.programWidget.exitCode = -1
+        self.programWidget.running = false
+    end
+    
+    return ok, result
+end
+
+function ProgramRunner:stop()
+    if self.coroutine == nil or coroutine.status(self.coroutine) == "dead" then
+        self.programWidget.running = false
+        return
+    end
+    
+    -- Close the coroutine
+    if coroutine.close then
+        coroutine.close(self.coroutine)
+    end
+    self.coroutine = nil
+    self.programWidget.running = false
+    self.programWidget.programInstance = nil
+end
+
+-- Program widget methods
+function Program:execute(path, env, addEnvironment, ...)
+    if self.running then
+        self:stop()
+    end
+    
+    self.path = path or self.path
+    self.running = true
+    self.exitCode = nil
+    self.lastError = nil
+    self.startTime = os.clock()
+    self.endTime = nil
+    
+    local programRunner = ProgramRunner.new(self, env or self.environmentVars, addEnvironment)
+    self.programInstance = programRunner
+    
+    programRunner:setArgs(...)
+    local ok, result = programRunner:run(self.path, self.width, self.height)
+    
+    if not ok then
+        self.running = false
+        self.endTime = os.clock()
+    end
+    
+    return ok, result
+end
+
+function Program:stop()
+    if self.programInstance then
+        self.programInstance:stop()
+    end
+    self.running = false
+    self.endTime = os.clock()
+    return self
+end
+
+function Program:sendEvent(event, ...)
+    if self.programInstance then
+        self.programInstance:resume(event, ...)
+    end
+    return self
+end
+
+function Program:isRunning()
+    return self.running
+end
+
+function Program:getPath()
+    return self.path
+end
+
+function Program:setPath(path)
+    self.path = path
+    return self
+end
+
+function Program:setEnvironment(env)
+    self.environmentVars = env or {}
+    return self
+end
+
+function Program:getEnvironment()
+    return self.environmentVars
+end
+
+function Program:setArgs(...)
+    self.args = {...}
+    return self
+end
+
+function Program:getArgs()
+    return self.args
+end
+
+function Program:getExitCode()
+    return self.exitCode
+end
+
+function Program:getLastError()
+    return self.lastError
+end
+
+function Program:getRuntime()
+    if self.startTime then
+        local endTime = self.endTime or os.clock()
+        return endTime - self.startTime
+    end
+    return 0
+end
+
+function Program:setErrorCallback(callback)
+    self.onError = callback
+    return self
+end
+
+function Program:setDoneCallback(callback)
+    self.onDone = callback
+    return self
+end
+
+function Program:setOutputCallback(callback)
+    self.onOutput = callback
+    return self
+end
+
+function Program:render()
+    Widget.render(self)
+    
+    -- Draw background
+    local bgColor = self.enabled and colors.black or colors.gray
+    term.setBackgroundColor(bgColor)
+    
+    for y = 1, self.height do
+        term.setCursorPos(self.x, self.y + y - 1)
+        term.write(string.rep(" ", self.width))
+    end
+    
+    -- Draw program output if running
+    if self.programInstance and self.programInstance.window then
+        local window = self.programInstance.window
+        local _, windowHeight = window.getSize()
+        
+        for y = 1, math.min(windowHeight, self.height) do
+            local text, fg, bg = window.getLine(y)
+            if text then
+                term.setCursorPos(self.x, self.y + y - 1)
+                if fg and bg then
+                    term.blit(text, fg, bg)
+                else
+                    term.setTextColor(colors.white)
+                    term.setBackgroundColor(colors.black)
+                    term.write(text)
+                end
+            end
+        end
+    elseif not self.running and self.path ~= "" then
+        -- Show program path when not running
+        term.setCursorPos(self.x + 1, self.y + 1)
+        term.setTextColor(colors.lightGray)
+        term.setBackgroundColor(colors.black)
+        term.write("Program: " .. self.path)
+        
+        if self.lastError then
+            term.setCursorPos(self.x + 1, self.y + 2)
+            term.setTextColor(colors.red)
+            term.write("Error: " .. self.lastError)
+        elseif self.exitCode ~= nil then
+            term.setCursorPos(self.x + 1, self.y + 2)
+            term.setTextColor(self.exitCode == 0 and colors.green or colors.yellow)
+            term.write("Exit code: " .. self.exitCode)
+        end
+    else
+        -- Show placeholder when no program set
+        term.setCursorPos(self.x + 1, self.y + math.floor(self.height / 2))
+        term.setTextColor(colors.gray)
+        term.setBackgroundColor(colors.black)
+        term.write("No program loaded")
+    end
+    
+    -- Draw border if enabled
+    if self.border then
+        drawBorder(self.x, self.y, self.width, self.height, self.borderColor or colors.white, self.backgroundColor or colors.black)
+    end
+end
+
+function Program:onClick(x, y)
+    if self.programInstance then
+        local relX = x - self.x + 1
+        local relY = y - self.y + 1
+        self.programInstance:resume("mouse_click", 1, relX, relY)
+        return true
+    end
+    return false
+end
+
+function Program:onScroll(x, y, direction)
+    if self.programInstance then
+        local relX = x - self.x + 1
+        local relY = y - self.y + 1
+        self.programInstance:resume("mouse_scroll", direction, relX, relY)
+        return true
+    end
+    return false
+end
+
+function Program:onDrag(x, y, button)
+    if self.programInstance then
+        local relX = x - self.x + 1
+        local relY = y - self.y + 1
+        self.programInstance:resume("mouse_drag", button, relX, relY)
+        return true
+    end
+    return false
+end
+
+function Program:onKey(key)
+    if self.programInstance then
+        self.programInstance:resume("key", key)
+        return true
+    end
+    return false
+end
+
+function Program:onChar(char)
+    if self.programInstance then
+        self.programInstance:resume("char", char)
+        return true
+    end
+    return false
+end
+
+function Program:resize(width, height)
+    Widget.resize(self, width, height)
+    if self.programInstance then
+        self.programInstance:resize(width, height)
+    end
+    return self
+end
+
+-- Helper method to restart the program
+function Program:restart()
+    if self.path and self.path ~= "" then
+        return self:execute(self.path, self.environmentVars, self.addEnvironment, table.unpack(self.args))
+    end
+    return false, "No program path set"
+end
+
+-- Helper method to get program window object (for advanced usage)
+function Program:getWindow()
+    if self.programInstance then
+        return self.programInstance.window
+    end
+    return nil
+end
+
+-- Helper method to check if program is responsive
+function Program:isResponsive()
+    if self.programInstance and self.programInstance.coroutine then
+        return coroutine.status(self.programInstance.coroutine) ~= "dead"
+    end
+    return false
+end
+
 -- FilePicker Widget
 local FilePicker = setmetatable({}, {__index = Widget})
 FilePicker.__index = FilePicker
@@ -8079,6 +8574,15 @@ function PixelUI.statusBar(props)
     return statusbar
 end
 
+function PixelUI.program(props)
+    local program = Program:new(props)
+    table.insert(widgets, program)
+    if rootContainer then
+        rootContainer:addChild(program)
+    end
+    return program
+end
+
 -- Convenience function for showing toast notifications
 function PixelUI.showToast(message, title, type, duration)
     local toast = PixelUI.notificationToast({
@@ -8558,6 +9062,7 @@ PixelUI.CodeEditor = CodeEditor
 PixelUI.Accordion = Accordion
 PixelUI.Minimap = Minimap
 PixelUI.StatusBar = StatusBar
+PixelUI.Program = Program
 
 -- Export thread manager for advanced usage
 PixelUI.ThreadManager = ThreadManager
