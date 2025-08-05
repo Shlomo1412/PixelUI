@@ -5888,6 +5888,7 @@ function CodeEditor:new(props)
     editor.autoIndent = props.autoIndent ~= false
     editor.matchBrackets = props.matchBrackets ~= false
     editor.autoComplete = props.autoComplete ~= false
+    editor.autoPairing = props.autoPairing ~= false  -- Auto-pairing enabled by default
     
     -- Auto-completion state
     editor.completionVisible = false
@@ -6478,6 +6479,11 @@ function CodeEditor:handleKey(key)
         return true
     end
     
+    -- Handle smart deletion for auto-paired characters
+    if key == keys.backspace and self:handleSmartDeletion() then
+        return true
+    end
+    
     -- Call parent handler
     local result = RichTextBox.handleKey(self, key)
     
@@ -6495,6 +6501,50 @@ function CodeEditor:handleKey(key)
     end
     
     return result
+end
+
+function CodeEditor:handleSmartDeletion()
+    -- Check if smart deletion is enabled
+    if not self.autoPairing then
+        return false
+    end
+    
+    -- Only handle if cursor is not at start of line
+    if self.cursorX <= 1 then
+        return false
+    end
+    
+    local currentLine = self.lines[self.cursorY] or ""
+    local charBeforeCursor = currentLine:sub(self.cursorX - 1, self.cursorX - 1)
+    local charAtCursor = currentLine:sub(self.cursorX, self.cursorX)
+    
+    -- Define pairs for smart deletion
+    local pairs = {
+        ["("] = ")",
+        ["["] = "]",
+        ["{"] = "}",
+        ['"'] = '"',
+        ["'"] = "'"
+    }
+    
+    -- Check if we have a pair that should be deleted together
+    if pairs[charBeforeCursor] and charAtCursor == pairs[charBeforeCursor] then
+        -- Delete both the opening and closing characters
+        local before = currentLine:sub(1, self.cursorX - 2)
+        local after = currentLine:sub(self.cursorX + 1)
+        
+        self.lines[self.cursorY] = before .. after
+        self.cursorX = self.cursorX - 1
+        
+        self:ensureCursorVisible()
+        if self.onChange then
+            self:onChange(self.lines, self.cursorX, self.cursorY)
+        end
+        
+        return true
+    end
+    
+    return false
 end
 
 -- Mouse-wheel scroll for both main editor and autocomplete popup
@@ -6559,7 +6609,15 @@ function CodeEditor:handleScroll(x, y, direction)
 end
 
 function CodeEditor:handleChar(char)
-    -- Call parent handler first
+    if not self.enabled or not self.focused or self.readonly then return false end
+    
+    -- Handle auto-pairing for brackets and quotes
+    if self:handleAutoPairing(char) then
+        -- Auto-pairing handled the character
+        return true
+    end
+    
+    -- Call parent handler for regular characters
     local result = RichTextBox.handleChar(self, char)
     
     -- Show auto-completion for word characters
@@ -6575,6 +6633,81 @@ function CodeEditor:handleChar(char)
     end
     
     return result
+end
+
+function CodeEditor:handleAutoPairing(char)
+    -- Check if auto-pairing is enabled
+    if not self.autoPairing then
+        return false
+    end
+    
+    -- Define pairs for auto-completion
+    local pairs = {
+        ["("] = ")",
+        ["["] = "]",
+        ["{"] = "}",
+        ['"'] = '"',
+        ["'"] = "'"
+    }
+    
+    local closingChars = {
+        [")"] = "(",
+        ["]"] = "[", 
+        ["}"] = "{",
+        ['"'] = '"',
+        ["'"] = "'"
+    }
+    
+    local currentLine = self.lines[self.cursorY] or ""
+    local charAtCursor = currentLine:sub(self.cursorX, self.cursorX)
+    
+    -- Handle closing characters - skip if we're at the matching closing char
+    if closingChars[char] and charAtCursor == char then
+        -- Move cursor past the existing closing character
+        self.cursorX = self.cursorX + 1
+        self:ensureCursorVisible()
+        return true
+    end
+    
+    -- Handle opening characters - insert both opening and closing
+    if pairs[char] then
+        local closingChar = pairs[char]
+        
+        -- For quotes, check if we should close an existing quote instead of opening a new pair
+        if (char == '"' or char == "'") then
+            -- Count quotes of this type before cursor to determine if we're opening or closing
+            local beforeCursor = currentLine:sub(1, self.cursorX - 1)
+            local quoteCount = 0
+            for i = 1, #beforeCursor do
+                if beforeCursor:sub(i, i) == char then
+                    quoteCount = quoteCount + 1
+                end
+            end
+            
+            -- If odd number of quotes, we're closing; if even, we're opening
+            if quoteCount % 2 == 1 then
+                -- We're closing a quote - just insert the closing quote
+                self:insertText(char)
+                return true
+            end
+        end
+        
+        -- Insert opening character and closing character
+        local before = currentLine:sub(1, self.cursorX - 1)
+        local after = currentLine:sub(self.cursorX)
+        
+        self.lines[self.cursorY] = before .. char .. closingChar .. after
+        self.cursorX = self.cursorX + 1  -- Position cursor between the pair
+        
+        self:ensureCursorVisible()
+        if self.onChange then
+            self:onChange(self.lines, self.cursorX, self.cursorY)
+        end
+        
+        return true
+    end
+    
+    return false  -- Character not handled by auto-pairing
 end
 
 function CodeEditor:handleEvent(event, ...)
