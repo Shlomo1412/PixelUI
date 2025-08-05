@@ -3571,6 +3571,16 @@ end
 
 function Modal:close()
     self.visible = false
+    
+    -- Remove all children from the global widgets list
+    if self.children then
+        for _, child in ipairs(self.children) do
+            PixelUI.removeWidgetAndChildren(child)
+        end
+        -- Clear the children array
+        self.children = {}
+    end
+    
     if self.onClose then
         self:onClose()
     end
@@ -5961,10 +5971,11 @@ function CodeEditor:render()
         drawCharBorder(absX, absY, self.width, self.height, colors.gray, colors.black)
     end
     
-    -- Calculate content area
+    -- Calculate content area (account for scrollbar if needed)
+    local needsScrollbar = #self.lines > (self.height - (self.border and 2 or 0))
     local contentX = absX + (self.border and 1 or 0) + 4 -- Always show line numbers
     local contentY = absY + (self.border and 1 or 0)
-    local contentWidth = self.width - (self.border and 2 or 0) - 4
+    local contentWidth = self.width - (self.border and 2 or 0) - 4 - (needsScrollbar and 1 or 0)
     local contentHeight = self.height - (self.border and 2 or 0)
     
     -- Draw line numbers
@@ -6005,6 +6016,33 @@ function CodeEditor:render()
             local currentLine = self.lines[self.cursorY] or ""
             local cursorChar = currentLine:sub(self.cursorX, self.cursorX)
             term.write(cursorChar ~= "" and cursorChar or " ")
+        end
+    end
+    
+    -- Draw vertical scrollbar if content is larger than visible area
+    if needsScrollbar then
+        local scrollbarX = absX + self.width - 1
+        local scrollbarHeight = contentHeight
+        local maxScrollY = math.max(0, #self.lines - contentHeight)
+        
+        -- Draw scrollbar background
+        term.setBackgroundColor(colors.lightGray)
+        for i = 0, scrollbarHeight - 1 do
+            term.setCursorPos(scrollbarX, contentY + i)
+            term.write(" ")
+        end
+        
+        -- Draw scrollbar thumb
+        if maxScrollY > 0 then
+            local thumbHeight = math.max(1, math.floor(scrollbarHeight * contentHeight / #self.lines))
+            local thumbPos = math.floor(scrollbarHeight * self.scrollY / maxScrollY)
+            thumbPos = math.min(thumbPos, scrollbarHeight - thumbHeight)
+            
+            term.setBackgroundColor(colors.gray)
+            for i = 0, thumbHeight - 1 do
+                term.setCursorPos(scrollbarX, contentY + thumbPos + i)
+                term.write(" ")
+            end
         end
     end
     
@@ -6459,38 +6497,64 @@ function CodeEditor:handleKey(key)
     return result
 end
 
--- Mouse-wheel scroll for autocomplete popup
+-- Mouse-wheel scroll for both main editor and autocomplete popup
 function CodeEditor:handleScroll(x, y, direction)
-    if not self.completionVisible or #self.completionOptions == 0 then return false end
-    -- Compute popup position and size (same logic as renderAutoCompletion)
+    if not self.enabled or not self.visible then return false end
+    
     local absX, absY = self:getAbsolutePos()
-    local contentX = absX + (self.border and 1 or 0) + 4
-    local contentY = absY + (self.border and 1 or 0)
-    local maxHeight = math.min(#self.completionOptions, self.maxCompletionHeight)
-    local contentWidth = 0
-    for i, opt in ipairs(self.completionOptions) do contentWidth = math.max(contentWidth, #opt.text) end
-    local totalWidth = self.completionBorder and (math.min(contentWidth + 2, self.maxCompletionWidth) + 2)
-        or math.min(contentWidth + 2, self.maxCompletionWidth)
-    local totalHeight = self.completionBorder and (maxHeight + 2) or maxHeight
-    local popupX = contentX + self.completionStartX - self.scrollX - 1
-    local popupY = contentY + self.completionStartY - self.scrollY
-    -- Adjust bounds
-    local termW, termH = term.getSize()
-    if popupX + totalWidth > termW then popupX = termW - totalWidth end
-    if popupY + totalHeight > termH then popupY = popupY - totalHeight - 1 end
-    popupX = math.max(1, popupX); popupY = math.max(1, popupY)
-    -- Check if within popup
-    if x >= popupX and x < popupX + totalWidth and y >= popupY and y < popupY + totalHeight then
-        -- Scroll the list by one
-        local total = #self.completionOptions
-        local maxScroll = total - maxHeight
-        if direction == -1 then -- wheel up
-            self.completionScroll = math.max(1, self.completionScroll - 1)
-        elseif direction == 1 then -- wheel down
-            self.completionScroll = math.min(math.max(1, maxScroll + 1), self.completionScroll + 1)
+    
+    -- Check if scroll event is within widget bounds
+    if x >= absX and x < absX + self.width and y >= absY and y < absY + self.height then
+        -- First check if we're scrolling in auto-completion popup
+        if self.completionVisible and #self.completionOptions > 0 then
+            -- Compute popup position and size (same logic as renderAutoCompletion)
+            local contentX = absX + (self.border and 1 or 0) + 4
+            local contentY = absY + (self.border and 1 or 0)
+            local maxHeight = math.min(#self.completionOptions, self.maxCompletionHeight)
+            local contentWidth = 0
+            for i, opt in ipairs(self.completionOptions) do 
+                contentWidth = math.max(contentWidth, #opt.text) 
+            end
+            local totalWidth = self.completionBorder and (math.min(contentWidth + 2, self.maxCompletionWidth) + 2)
+                or math.min(contentWidth + 2, self.maxCompletionWidth)
+            local totalHeight = self.completionBorder and (maxHeight + 2) or maxHeight
+            local popupX = contentX + self.completionStartX - self.scrollX - 1
+            local popupY = contentY + self.completionStartY - self.scrollY
+            
+            -- Adjust bounds
+            local termW, termH = term.getSize()
+            if popupX + totalWidth > termW then popupX = termW - totalWidth end
+            if popupY + totalHeight > termH then popupY = popupY - totalHeight - 1 end
+            popupX = math.max(1, popupX); popupY = math.max(1, popupY)
+            
+            -- Check if within popup
+            if x >= popupX and x < popupX + totalWidth and y >= popupY and y < popupY + totalHeight then
+                -- Scroll the auto-completion list
+                local total = #self.completionOptions
+                local maxScroll = total - maxHeight
+                if direction == -1 then -- wheel up
+                    self.completionScroll = math.max(1, self.completionScroll - 1)
+                elseif direction == 1 then -- wheel down
+                    self.completionScroll = math.min(math.max(1, maxScroll + 1), self.completionScroll + 1)
+                end
+                return true
+            end
         end
+        
+        -- Otherwise, scroll the main editor content
+        local scrollAmount = 3 -- Number of lines to scroll per wheel tick
+        local contentHeight = self.height - (self.border and 2 or 0)
+        local maxScrollY = math.max(0, #self.lines - contentHeight)
+        
+        if direction == -1 then -- Scroll up
+            self.scrollY = math.max(0, self.scrollY - scrollAmount)
+        elseif direction == 1 then -- Scroll down
+            self.scrollY = math.min(maxScrollY, self.scrollY + scrollAmount)
+        end
+        
         return true
     end
+    
     return false
 end
 
@@ -6549,6 +6613,43 @@ end
 -- Method to check if auto-completion is currently visible
 function CodeEditor:isAutoCompletionVisible()
     return self.completionVisible or false
+end
+
+-- Scrolling utility methods
+function CodeEditor:scrollToLine(lineNumber)
+    if lineNumber < 1 then lineNumber = 1 end
+    if lineNumber > #self.lines then lineNumber = #self.lines end
+    
+    local contentHeight = self.height - (self.border and 2 or 0)
+    self.scrollY = math.max(0, lineNumber - math.floor(contentHeight / 2))
+    
+    local maxScrollY = math.max(0, #self.lines - contentHeight)
+    self.scrollY = math.min(self.scrollY, maxScrollY)
+end
+
+function CodeEditor:scrollBy(lines)
+    local contentHeight = self.height - (self.border and 2 or 0)
+    local maxScrollY = math.max(0, #self.lines - contentHeight)
+    
+    self.scrollY = math.max(0, math.min(maxScrollY, self.scrollY + lines))
+end
+
+function CodeEditor:scrollToTop()
+    self.scrollY = 0
+end
+
+function CodeEditor:scrollToBottom()
+    local contentHeight = self.height - (self.border and 2 or 0)
+    self.scrollY = math.max(0, #self.lines - contentHeight)
+end
+
+function CodeEditor:getMaxLineLength()
+    local maxLength = 0
+    for i = 1, #self.lines do
+        local line = self.lines[i] or ""
+        maxLength = math.max(maxLength, #line)
+    end
+    return maxLength
 end
 
 -- Accordion Widget (Collapsible sections)
@@ -7522,6 +7623,32 @@ function PixelUI.init()
     running = false
 end
 
+-- Helper function to remove a widget from the global widgets list
+function PixelUI.removeWidget(widget)
+    for i, w in ipairs(widgets) do
+        if w == widget then
+            table.remove(widgets, i)
+            break
+        end
+    end
+    -- Also remove from root container if it's there
+    if rootContainer then
+        rootContainer:removeChild(widget)
+    end
+end
+
+-- Helper function to recursively remove all children of a widget
+function PixelUI.removeWidgetAndChildren(widget)
+    -- First remove all children recursively
+    if widget.children then
+        for _, child in ipairs(widget.children) do
+            PixelUI.removeWidgetAndChildren(child)
+        end
+    end
+    -- Then remove the widget itself
+    PixelUI.removeWidget(widget)
+end
+
 -- Developer-friendly: PixelUI handles the event loop and animation internally
 function PixelUI.run(userConfig)
     -- userConfig: { onKey, onEvent, onQuit, onStart, ... } (optional)
@@ -7560,8 +7687,7 @@ function PixelUI.run(userConfig)
                     if userConfig.onKey(p1) == false then
                         running = false
                     end
-                elseif p1 == keys.q then
-                    running = false
+                -- Removed default 'q' key quit behavior
                 end
             end
             if userConfig and userConfig.onExit and userConfig.onExit() then
@@ -7591,10 +7717,15 @@ end
 
 function PixelUI.button(props)
     local button = Button:new(props)
-    table.insert(widgets, button)
-    if rootContainer then
-        rootContainer:addChild(button)
+    
+    -- If this button is meant to be a child of another widget, don't add it globally
+    if not props.isChildWidget then
+        table.insert(widgets, button)
+        if rootContainer then
+            rootContainer:addChild(button)
+        end
     end
+    
     return button
 end
 
