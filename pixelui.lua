@@ -5971,24 +5971,27 @@ function CodeEditor:render()
         drawCharBorder(absX, absY, self.width, self.height, colors.gray, colors.black)
     end
     
-    -- Calculate content area (account for scrollbar if needed)
+    -- Calculate content area (account for scrollbar and optional line numbers)
     local needsScrollbar = #self.lines > (self.height - (self.border and 2 or 0))
-    local contentX = absX + (self.border and 1 or 0) + 4 -- Always show line numbers
+    local lineNumWidth = self.showLineNumbers and 4 or 0
+    local contentX = absX + (self.border and 1 or 0) + lineNumWidth
     local contentY = absY + (self.border and 1 or 0)
-    local contentWidth = self.width - (self.border and 2 or 0) - 4 - (needsScrollbar and 1 or 0)
+    local contentWidth = self.width - (self.border and 2 or 0) - lineNumWidth - (needsScrollbar and 1 or 0)
     local contentHeight = self.height - (self.border and 2 or 0)
     
-    -- Draw line numbers
-    term.setBackgroundColor(colors.gray)
-    term.setTextColor(colors.lightGray)
-    for i = 1, contentHeight do
-        local lineNum = i + self.scrollY
-        term.setCursorPos(absX + (self.border and 1 or 0), contentY + i - 1)
-        if lineNum <= #self.lines then
-            local numStr = tostring(lineNum)
-            term.write(string.rep(" ", 3 - #numStr) .. numStr)
-        else
-            term.write("   ")
+    -- Draw line numbers if enabled
+    if self.showLineNumbers then
+        term.setBackgroundColor(colors.gray)
+        term.setTextColor(colors.lightGray)
+        for i = 1, contentHeight do
+            local lineNum = i + self.scrollY
+            term.setCursorPos(absX + (self.border and 1 or 0), contentY + i - 1)
+            if lineNum <= #self.lines then
+                local numStr = tostring(lineNum)
+                term.write(string.rep(" ", 3 - #numStr) .. numStr)
+            else
+                term.write("   ")
+            end
         end
     end
     
