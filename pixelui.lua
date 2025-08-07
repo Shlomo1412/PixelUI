@@ -1936,14 +1936,11 @@ function Container:new(props)
     container.isScrollable = props.isScrollable ~= false -- Default enabled
     container.scrollX = 0
     container.scrollY = 0
-    container.maxScrollX = 0
-    container.maxScrollY = 0
     container.contentWidth = 0
     container.contentHeight = 0
     container.verticalScrollBar = nil
     container.horizontalScrollBar = nil
     container.autoMargin = props.autoMargin or false
-    container.scrollSpeed = props.scrollSpeed or 3 -- Lines to scroll per wheel event
     
     return container
 end
@@ -1973,136 +1970,98 @@ function Container:render()
         end
     end
     
-    -- Update content dimensions and scrollbars
-    self:updateScrolling()
+    -- Update content dimensions and create scrollbars if needed
+    self:updateScrollBars()
     
     term.setBackgroundColor(colors.black)
 end
 
-function Container:updateScrolling()
+function Container:updateScrollBars()
     if not self.isScrollable then return end
     
     -- Calculate content bounds
     self:calculateContentBounds()
     
-    -- Calculate viewport dimensions
-    local viewportWidth = self.width - (self.border and 2 or 0)
-    local viewportHeight = self.height - (self.border and 2 or 0)
+    local viewWidth = self.width - (self.border and 2 or 0)
+    local viewHeight = self.height - (self.border and 2 or 0)
     
-    -- Check if scrollbars are needed
-    local needsVerticalScroll = self.contentHeight > viewportHeight
-    local needsHorizontalScroll = self.contentWidth > viewportWidth
+    local needsVerticalScroll = self.contentHeight > viewHeight
+    local needsHorizontalScroll = self.contentWidth > viewWidth
     
-    -- Account for scrollbar space reduction
-    local effectiveViewportWidth = viewportWidth - (needsVerticalScroll and 1 or 0)
-    local effectiveViewportHeight = viewportHeight - (needsHorizontalScroll and 1 or 0)
-    
-    -- Recheck scroll needs after accounting for scrollbar space
-    if not needsVerticalScroll and self.contentHeight > effectiveViewportHeight then
-        needsVerticalScroll = true
-        effectiveViewportWidth = viewportWidth - 1
+    -- Account for scrollbar space
+    if needsVerticalScroll then
+        viewWidth = viewWidth - 1
     end
-    if not needsHorizontalScroll and self.contentWidth > effectiveViewportWidth then
-        needsHorizontalScroll = true
-        effectiveViewportHeight = viewportHeight - 1
-    end
-    
-    -- Calculate maximum scroll values
-    self.maxScrollY = math.max(0, self.contentHeight - effectiveViewportHeight)
-    self.maxScrollX = math.max(0, self.contentWidth - effectiveViewportWidth)
-    
-    -- Clamp current scroll values
-    self.scrollY = math.max(0, math.min(self.maxScrollY, self.scrollY))
-    self.scrollX = math.max(0, math.min(self.maxScrollX, self.scrollX))
-    
-    -- Create or update scrollbars
-    self:updateScrollBars(needsVerticalScroll, needsHorizontalScroll, effectiveViewportWidth, effectiveViewportHeight)
-end
-
-function Container:updateScrollBars(needsVertical, needsHorizontal, viewportWidth, viewportHeight)
-    -- Get ScrollBar class reference - check multiple possible locations
-    local ScrollBarClass = nil
-    if PixelUI and PixelUI.ScrollBar then
-        ScrollBarClass = PixelUI.ScrollBar
-    elseif _G.ScrollBar then
-        ScrollBarClass = _G.ScrollBar
-    else
-        -- Try to find ScrollBar in current scope
-        local success, result = pcall(function() return ScrollBar end)
-        if success and result then
-            ScrollBarClass = result
+    if needsHorizontalScroll then
+        viewHeight = viewHeight - 1
+        -- Re-check vertical scroll need after horizontal scrollbar takes space
+        needsVerticalScroll = self.contentHeight > viewHeight
+        if needsVerticalScroll and not needsHorizontalScroll then
+            viewWidth = viewWidth - 1 -- Account for vertical scrollbar
         end
     end
     
-    if not ScrollBarClass then
-        -- ScrollBar not yet available, store the need for later
-        self._needsVerticalScroll = needsVertical
-        self._needsHorizontalScroll = needsHorizontal
-        self._pendingViewportWidth = viewportWidth
-        self._pendingViewportHeight = viewportHeight
+    -- Only create scrollbars if ScrollBar class is available
+    -- (ScrollBar is defined later in the file, so we need to check if it exists)
+    if not ScrollBar then
+        -- ScrollBar not yet defined, skip scrollbar creation for now
         return
     end
     
-    -- Vertical scrollbar
-    if needsVertical then
-        if not self.verticalScrollBar then
-            self.verticalScrollBar = ScrollBarClass:new({
-                x = self.width - (self.border and 1 or 0),
-                y = (self.border and 2 or 1),
-                width = 1,
-                height = viewportHeight,
-                orientation = "vertical",
-                min = 0,
-                max = self.maxScrollY,
-                value = self.scrollY,
-                pageSize = viewportHeight,
-                step = 1,
-                onChange = function(value)
-                    self.scrollY = value
-                end
-            })
-            self.verticalScrollBar.parent = self
-        else
-            -- Update existing scrollbar
-            self.verticalScrollBar.height = viewportHeight
-            self.verticalScrollBar.max = self.maxScrollY
-            self.verticalScrollBar.value = self.scrollY
-            self.verticalScrollBar.pageSize = viewportHeight
-        end
-    else
+    -- Create vertical scrollbar if needed
+    if needsVerticalScroll and not self.verticalScrollBar then
+        self.verticalScrollBar = ScrollBar:new({
+            x = self.width - (self.border and 1 or 0),
+            y = (self.border and 2 or 1),
+            width = 1,
+            height = viewHeight,
+            orientation = "vertical",
+            min = 0,
+            max = math.max(0, self.contentHeight - viewHeight),
+            value = self.scrollY or 0,
+            pageSize = viewHeight,
+            step = 1,
+            onChange = function(value)
+                self.scrollY = value
+            end
+        })
+        self.verticalScrollBar.parent = self
+    elseif not needsVerticalScroll and self.verticalScrollBar then
         self.verticalScrollBar = nil
         self.scrollY = 0
+    elseif self.verticalScrollBar then
+        -- Update existing scrollbar properties
+        self.verticalScrollBar.max = math.max(0, self.contentHeight - viewHeight)
+        self.verticalScrollBar.pageSize = viewHeight
+        self.verticalScrollBar.value = math.min(self.verticalScrollBar.value, self.verticalScrollBar.max)
     end
     
-    -- Horizontal scrollbar
-    if needsHorizontal then
-        if not self.horizontalScrollBar then
-            self.horizontalScrollBar = ScrollBarClass:new({
-                x = (self.border and 2 or 1),
-                y = self.height - (self.border and 1 or 0),
-                width = viewportWidth,
-                height = 1,
-                orientation = "horizontal",
-                min = 0,
-                max = self.maxScrollX,
-                value = self.scrollX,
-                pageSize = viewportWidth,
-                step = 1,
-                onChange = function(value)
-                    self.scrollX = value
-                end
-            })
-            self.horizontalScrollBar.parent = self
-        else
-            -- Update existing scrollbar
-            self.horizontalScrollBar.width = viewportWidth
-            self.horizontalScrollBar.max = self.maxScrollX
-            self.horizontalScrollBar.value = self.scrollX
-            self.horizontalScrollBar.pageSize = viewportWidth
-        end
-    else
+    -- Create horizontal scrollbar if needed
+    if needsHorizontalScroll and not self.horizontalScrollBar then
+        self.horizontalScrollBar = ScrollBar:new({
+            x = (self.border and 2 or 1),
+            y = self.height - (self.border and 1 or 0),
+            width = viewWidth,
+            height = 1,
+            orientation = "horizontal",
+            min = 0,
+            max = math.max(0, self.contentWidth - viewWidth),
+            value = self.scrollX or 0,
+            pageSize = viewWidth,
+            step = 1,
+            onChange = function(value)
+                self.scrollX = value
+            end
+        })
+        self.horizontalScrollBar.parent = self
+    elseif not needsHorizontalScroll and self.horizontalScrollBar then
         self.horizontalScrollBar = nil
         self.scrollX = 0
+    elseif self.horizontalScrollBar then
+        -- Update existing scrollbar properties
+        self.horizontalScrollBar.max = math.max(0, self.contentWidth - viewWidth)
+        self.horizontalScrollBar.pageSize = viewWidth
+        self.horizontalScrollBar.value = math.min(self.horizontalScrollBar.value, self.horizontalScrollBar.max)
     end
 end
 
@@ -2120,117 +2079,58 @@ function Container:calculateContentBounds()
         end
     end
     
-    -- Add padding to content bounds
-    self.contentWidth = self.contentWidth + self.padding
-    self.contentHeight = self.contentHeight + self.padding
+    -- Ensure minimum content size to match viewport
+    local viewWidth = self.width - (self.border and 2 or 0)
+    local viewHeight = self.height - (self.border and 2 or 0)
+    self.contentWidth = math.max(self.contentWidth, viewWidth)
+    self.contentHeight = math.max(self.contentHeight, viewHeight)
 end
 
 function Container:draw()
     if not self.visible then return end
-    
-    -- Retry scrollbar creation if it was deferred
-    self:retryScrollBarCreation()
-    
     self:render()
     
-    -- Calculate viewport dimensions and position
-    local viewportX = self.x + (self.border and 1 or 0)
-    local viewportY = self.y + (self.border and 1 or 0)
-    local viewportWidth = self.width - (self.border and 2 or 0) - (self.verticalScrollBar and 1 or 0)
-    local viewportHeight = self.height - (self.border and 2 or 0) - (self.horizontalScrollBar and 1 or 0)
+    -- Calculate content and viewport dimensions
+    local contentX = self.x + (self.border and 1 or 0)
+    local contentY = self.y + (self.border and 1 or 0)
+    local contentWidth = self.width - (self.border and 2 or 0) - (self.verticalScrollBar and 1 or 0)
+    local contentHeight = self.height - (self.border and 2 or 0) - (self.horizontalScrollBar and 1 or 0)
     
-    -- Set up clipping region
-    local oldTerm = term.current()
-    local clippedTerm = {}
-    
-    -- Create a clipped terminal that only allows drawing within viewport
-    for k, v in pairs(oldTerm) do
-        clippedTerm[k] = v
-    end
-    
-    local originalSetCursor = clippedTerm.setCursorPos
-    local originalWrite = clippedTerm.write
-    local originalBlit = clippedTerm.blit
-    
-    -- Override terminal functions to clip to viewport
-    clippedTerm.setCursorPos = function(x, y)
-        local clipX = x - self.scrollX
-        local clipY = y - self.scrollY
-        
-        if clipX >= viewportX and clipX < viewportX + viewportWidth and 
-           clipY >= viewportY and clipY < viewportY + viewportHeight then
-            return originalSetCursor(clipX, clipY)
-        end
-        return originalSetCursor(-1000, -1000) -- Move cursor off-screen
-    end
-    
-    clippedTerm.write = function(text)
-        local cursorX, cursorY = clippedTerm.getCursorPos()
-        if cursorX >= viewportX and cursorX < viewportX + viewportWidth and
-           cursorY >= viewportY and cursorY < viewportY + viewportHeight then
-            -- Clip text to fit within viewport
-            local remainingWidth = (viewportX + viewportWidth) - cursorX
-            if remainingWidth > 0 then
-                local clippedText = text:sub(1, remainingWidth)
-                return originalWrite(clippedText)
-            end
-        end
-    end
-    
-    clippedTerm.blit = function(text, textColor, backgroundColor)
-        local cursorX, cursorY = clippedTerm.getCursorPos()
-        if cursorX >= viewportX and cursorX < viewportX + viewportWidth and
-           cursorY >= viewportY and cursorY < viewportY + viewportHeight then
-            -- Clip text to fit within viewport
-            local remainingWidth = (viewportX + viewportWidth) - cursorX
-            if remainingWidth > 0 then
-                local clippedText = text:sub(1, remainingWidth)
-                local clippedTextColor = textColor:sub(1, remainingWidth)
-                local clippedBgColor = backgroundColor:sub(1, remainingWidth)
-                return originalBlit(clippedText, clippedTextColor, clippedBgColor)
-            end
-        end
-    end
-    
-    -- Temporarily switch to clipped terminal
-    term.redirect(clippedTerm)
-    
-    -- Draw children with scroll offset
+    -- Draw children with scroll offset and clipping
     for _, child in ipairs(self.children) do
         if child.visible ~= false then
             -- Store original position
             local originalX, originalY = child.x, child.y
             
-            -- Apply scroll offset to child position
-            local childScreenX = viewportX + child.x - self.scrollX - 1
-            local childScreenY = viewportY + child.y - self.scrollY - 1
+            -- Apply scroll offset
+            child.x = child.x - (self.scrollX or 0)
+            child.y = child.y - (self.scrollY or 0)
             
-            -- Check if child is potentially visible (rough bounds check)
-            if childScreenX + child.width > viewportX and childScreenX < viewportX + viewportWidth and
-               childScreenY + child.height > viewportY and childScreenY < viewportY + viewportHeight then
-                
-                -- Temporarily adjust child position for drawing
-                child.x = childScreenX
-                child.y = childScreenY
-                
+            -- Check if child is within viewport bounds
+            local childLeft = contentX + child.x - 1
+            local childTop = contentY + child.y - 1
+            local childRight = childLeft + child.width - 1
+            local childBottom = childTop + child.height - 1
+            
+            local viewportLeft = contentX
+            local viewportTop = contentY
+            local viewportRight = contentX + contentWidth - 1
+            local viewportBottom = contentY + contentHeight - 1
+            
+            -- Only draw if child overlaps with viewport
+            if childRight >= viewportLeft and childLeft <= viewportRight and 
+               childBottom >= viewportTop and childTop <= viewportBottom then
                 child:draw()
-                
-                -- Restore original position
-                child.x, child.y = originalX, originalY
             end
+            
+            -- Restore original position
+            child.x, child.y = originalX, originalY
         end
     end
     
-    -- Restore original terminal
-    term.redirect(oldTerm)
-    
-    -- Draw scrollbars on top
-    if self.verticalScrollBar then 
-        self.verticalScrollBar:draw() 
-    end
-    if self.horizontalScrollBar then 
-        self.horizontalScrollBar:draw() 
-    end
+    -- Draw scrollbars last
+    if self.verticalScrollBar then self.verticalScrollBar:draw() end
+    if self.horizontalScrollBar then self.horizontalScrollBar:draw() end
 end
 
 function Container:handleScroll(x, y, direction)
@@ -2241,166 +2141,26 @@ function Container:handleScroll(x, y, direction)
     
     -- Check if scroll is within container bounds
     if isPointInBounds(relX, relY, {x = 1, y = 1, width = self.width, height = self.height}) then
-        local scrollAmount = direction * self.scrollSpeed
+        local scrollAmount = direction * 3 -- Scroll 3 lines at a time
         
-        -- Vertical scrolling is primary
-        if self.maxScrollY > 0 then
-            local oldScrollY = self.scrollY
-            self.scrollY = math.max(0, math.min(self.maxScrollY, self.scrollY + scrollAmount))
-            
-            -- Update vertical scrollbar if it exists
-            if self.verticalScrollBar then
-                self.verticalScrollBar.value = self.scrollY
-            end
-            
-            return oldScrollY ~= self.scrollY -- Return true if we actually scrolled
-        elseif self.maxScrollX > 0 then
-            -- Fall back to horizontal scrolling if no vertical scrolling is possible
-            local oldScrollX = self.scrollX
-            self.scrollX = math.max(0, math.min(self.maxScrollX, self.scrollX + scrollAmount))
-            
-            -- Update horizontal scrollbar if it exists
-            if self.horizontalScrollBar then
-                self.horizontalScrollBar.value = self.scrollX
-            end
-            
-            return oldScrollX ~= self.scrollX -- Return true if we actually scrolled
-        end
-    end
-    
-    return false
-end
-
-function Container:handleClick(x, y)
-    if not self.enabled or not self.visible then return false end
-
-    local absX, absY = self:getAbsolutePos()
-    local relX, relY = x - absX + 1, y - absY + 1
-
-    -- Check scrollbar clicks first (highest priority)
-    if self.verticalScrollBar and self.verticalScrollBar:handleClick(x, y) then
-        return true
-    end
-    if self.horizontalScrollBar and self.horizontalScrollBar:handleClick(x, y) then
-        return true
-    end
-
-    -- Check children clicks (adjusted for scroll offset)
-    local viewportX = (self.border and 1 or 0) + 1
-    local viewportY = (self.border and 1 or 0) + 1
-    local viewportWidth = self.width - (self.border and 2 or 0) - (self.verticalScrollBar and 1 or 0)
-    local viewportHeight = self.height - (self.border and 2 or 0) - (self.horizontalScrollBar and 1 or 0)
-    
-    -- Only process clicks within the content viewport
-    if relX >= viewportX and relX < viewportX + viewportWidth and
-       relY >= viewportY and relY < viewportY + viewportHeight then
-        
-        -- Adjust click coordinates for scroll offset
-        local contentRelX = relX - viewportX + 1 + self.scrollX
-        local contentRelY = relY - viewportY + 1 + self.scrollY
-        local contentX = absX + viewportX - 1 + self.scrollX
-        local contentY = absY + viewportY - 1 + self.scrollY
-        
-        -- Check children in reverse order for proper z-index handling
-        for i = #self.children, 1, -1 do
-            local child = self.children[i]
-            if child.visible ~= false then
-                local childLeft = child.x
-                local childTop = child.y
-                local childRight = childLeft + child.width - 1
-                local childBottom = childTop + child.height - 1
-                
-                -- Check if click is within child bounds (in content space)
-                if contentRelX >= childLeft and contentRelX <= childRight and
-                   contentRelY >= childTop and contentRelY <= childBottom then
-                    
-                    -- Calculate click position relative to child
-                    local childClickX = contentX + contentRelX - childLeft
-                    local childClickY = contentY + contentRelY - childTop
-                    
-                    if child:handleClick(childClickX, childClickY) then
-                        return true
-                    end
-                end
-            end
-        end
-        
-        -- If no child handled the click, container handles it
-        if self.onClick then
-            self:onClick(relX, relY)
+        if self.verticalScrollBar and self.verticalScrollBar.scroll then
+            -- Use scrollbar if available
+            self.verticalScrollBar:scroll(-scrollAmount) -- Flip direction for natural scrolling
+            return true
+        else
+            -- Direct scroll handling when no scrollbar is available
+            local maxScrollY = math.max(0, self.contentHeight - (self.height - (self.border and 2 or 0)))
+            self.scrollY = math.max(0, math.min(maxScrollY, (self.scrollY or 0) + scrollAmount)) -- Flip direction
             return true
         end
     end
-
+    
     return false
-end
-
-function Container:scrollToChild(child)
-    if not child or not self.isScrollable then return end
-    
-    local viewportWidth = self.width - (self.border and 2 or 0) - (self.verticalScrollBar and 1 or 0)
-    local viewportHeight = self.height - (self.border and 2 or 0) - (self.horizontalScrollBar and 1 or 0)
-    
-    -- Calculate child bounds
-    local childLeft = child.x
-    local childTop = child.y
-    local childRight = childLeft + child.width - 1
-    local childBottom = childTop + child.height - 1
-    
-    -- Vertical scrolling
-    if childTop < self.scrollY then
-        -- Child is above visible area
-        self.scrollY = childTop
-    elseif childBottom > self.scrollY + viewportHeight - 1 then
-        -- Child is below visible area
-        self.scrollY = childBottom - viewportHeight + 1
-    end
-    
-    -- Horizontal scrolling
-    if childLeft < self.scrollX then
-        -- Child is left of visible area
-        self.scrollX = childLeft
-    elseif childRight > self.scrollX + viewportWidth - 1 then
-        -- Child is right of visible area
-        self.scrollX = childRight - viewportWidth + 1
-    end
-    
-    -- Clamp scroll values
-    self.scrollY = math.max(0, math.min(self.maxScrollY, self.scrollY))
-    self.scrollX = math.max(0, math.min(self.maxScrollX, self.scrollX))
-    
-    -- Update scrollbars
-    if self.verticalScrollBar then
-        self.verticalScrollBar.value = self.scrollY
-    end
-    if self.horizontalScrollBar then
-        self.horizontalScrollBar.value = self.scrollX
-    end
 end
 
 function Container:addChild(child)
     Widget.addChild(self, child)
     self:layoutChildren()
-    -- Update scrolling after adding child
-    self:updateScrolling()
-end
-
--- Method to retry scrollbar creation if it was deferred
-function Container:retryScrollBarCreation()
-    if (self._needsVerticalScroll or self._needsHorizontalScroll) and 
-       self._pendingViewportWidth and self._pendingViewportHeight then
-        self:updateScrollBars(
-            self._needsVerticalScroll, 
-            self._needsHorizontalScroll, 
-            self._pendingViewportWidth, 
-            self._pendingViewportHeight
-        )
-        -- Clear pending flags
-        self._needsVerticalScroll = nil
-        self._needsHorizontalScroll = nil
-        self._pendingViewportWidth = nil
-        self._pendingViewportHeight = nil
-    end
 end
 
 function Container:layoutChildren()
