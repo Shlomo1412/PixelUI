@@ -8863,6 +8863,37 @@ function PixelUI.handleEvent(event, ...)
             return
         end
 
+        -- Check for open ComboBox dropdowns first - they should intercept clicks before other widgets
+        local function checkComboBoxDropdowns(widgetList)
+            for _, widget in ipairs(widgetList) do
+                if widget.__index == ComboBox and widget.visible ~= false and widget.isOpen then
+                    local absX, absY = widget:getAbsolutePos()
+                    local relX, relY = x - absX + 1, y - absY + 1
+                    
+                    -- Check if click is within the dropdown area (not just the main box)
+                    if relX >= 1 and relX <= widget.width and relY >= 1 and relY <= widget.height then
+                        widget:onClick(relX, relY)
+                        return true
+                    end
+                end
+                -- Recursively check children
+                if widget.children and checkComboBoxDropdowns(widget.children) then
+                    return true
+                end
+            end
+            return false
+        end
+        
+        -- Check ComboBox dropdowns in all widget hierarchies
+        local comboBoxHandled = checkComboBoxDropdowns(widgets)
+        if rootContainer and rootContainer.children then
+            comboBoxHandled = comboBoxHandled or checkComboBoxDropdowns(rootContainer.children)
+        end
+        
+        if comboBoxHandled then
+            return -- ComboBox dropdown handled the click, don't process other widgets
+        end
+
         -- Recursively traverse all widgets and their children (depth-first, z-order)
         local function traverse(list, fn)
             for i = #list, 1, -1 do
