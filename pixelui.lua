@@ -2577,15 +2577,21 @@ function ComboBox:render()
     term.setBackgroundColor(self.background)
     term.setTextColor(self.color)
     
-    -- Draw main box
+    -- Draw main box only (dropdown is rendered separately to appear on top)
     term.setCursorPos(absX, absY)
     local selectedText = self.items[self.selectedIndex] or ""
     local displayText = selectedText:sub(1, self.width - 2)
     local arrowChar = self.isOpen and "\30" or "\31"  -- Up arrow when open, down arrow when closed
     term.write(displayText .. string.rep(" ", self.width - 2 - #displayText) .. arrowChar)
     
-    -- Draw dropdown if open
+    term.setBackgroundColor(colors.black)
+end
+
+function ComboBox:renderDropdown()
+    -- Render dropdown on top of everything else
     if self.isOpen then
+        local absX, absY = self:getAbsolutePos()
+        
         for i = 1, #self.items do
             local item = self.items[i]
             if item then
@@ -2597,9 +2603,9 @@ function ComboBox:render()
                 term.write(itemText .. string.rep(" ", self.width - #itemText))
             end
         end
+        
+        term.setBackgroundColor(colors.black)
     end
-    
-    term.setBackgroundColor(colors.black)
 end
 
 function ComboBox:onClick(relX, relY)
@@ -8790,15 +8796,33 @@ function PixelUI.render()
         end
     end
     
+    -- Render ComboBox dropdowns on top of everything else
+    local function renderComboBoxDropdowns(widgetList)
+        for _, widget in ipairs(widgetList) do
+            if widget.__index == ComboBox and widget.visible ~= false and widget.isOpen then
+                widget:renderDropdown()
+            end
+            -- Recursively check children
+            if widget.children then
+                renderComboBoxDropdowns(widget.children)
+            end
+        end
+    end
+    
     -- Render auto-completions from all widgets (including nested ones)
     renderAutoCompletions(widgets)
+    
+    -- Render ComboBox dropdowns from all widgets (including nested ones)
+    renderComboBoxDropdowns(widgets)
     
     -- Also check modal and root container
     if activeModal and activeModal.children then
         renderAutoCompletions(activeModal.children)
+        renderComboBoxDropdowns(activeModal.children)
     end
     if rootContainer and rootContainer.children then
         renderAutoCompletions(rootContainer.children)
+        renderComboBoxDropdowns(rootContainer.children)
     end
 end
 
