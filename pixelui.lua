@@ -537,6 +537,43 @@ function Widget:handleClick(x, y)
     local absX, absY = self:getAbsolutePos()
     local relX, relY = x - absX + 1, y - absY + 1
 
+    -- Check for open ComboBox dropdowns first - they should have priority over all other widgets
+    local function findOpenComboBox(widgetList, clickX, clickY)
+        for _, widget in ipairs(widgetList) do
+            if widget.__index == ComboBox and widget.visible ~= false and widget.isOpen then
+                local cbAbsX, cbAbsY = widget:getAbsolutePos()
+                local cbRelX, cbRelY = clickX - cbAbsX + 1, clickY - cbAbsY + 1
+                
+                -- Check if click is within the dropdown area
+                if cbRelX >= 1 and cbRelX <= widget.width and cbRelY >= 1 and cbRelY <= (1 + #widget.items) then
+                    return widget
+                end
+            end
+            -- Recursively check children
+            if widget.children then
+                local foundCombo = findOpenComboBox(widget.children, clickX, clickY)
+                if foundCombo then return foundCombo end
+            end
+        end
+        return nil
+    end
+    
+    -- Check all widget hierarchies for open ComboBoxes
+    local openComboBox = findOpenComboBox(widgets, x, y)
+    if not openComboBox and rootContainer and rootContainer.children then
+        openComboBox = findOpenComboBox(rootContainer.children, x, y)
+    end
+    
+    -- If we found an open ComboBox that should handle this click, handle it and block other widgets
+    if openComboBox and openComboBox ~= self then
+        local cbAbsX, cbAbsY = openComboBox:getAbsolutePos()
+        local cbRelX, cbRelY = x - cbAbsX + 1, y - cbAbsY + 1
+        if openComboBox.onClick then
+            openComboBox:onClick(cbRelX, cbRelY)
+        end
+        return true -- Block other widgets from handling this click
+    end
+
     -- Check children first (reverse order for proper z-index handling)
     for i = #self.children, 1, -1 do
         if self.children[i]:handleClick(x, y) then
@@ -8861,37 +8898,6 @@ function PixelUI.handleEvent(event, ...)
                 activeModal:handleClick(x, y)
             end
             return
-        end
-
-        -- Check for open ComboBox dropdowns first - they should intercept clicks before other widgets
-        local function checkComboBoxDropdowns(widgetList)
-            for _, widget in ipairs(widgetList) do
-                if widget.__index == ComboBox and widget.visible ~= false and widget.isOpen then
-                    local absX, absY = widget:getAbsolutePos()
-                    local relX, relY = x - absX + 1, y - absY + 1
-                    
-                    -- Check if click is within the dropdown area (not just the main box)
-                    if relX >= 1 and relX <= widget.width and relY >= 1 and relY <= widget.height then
-                        widget:onClick(relX, relY)
-                        return true
-                    end
-                end
-                -- Recursively check children
-                if widget.children and checkComboBoxDropdowns(widget.children) then
-                    return true
-                end
-            end
-            return false
-        end
-        
-        -- Check ComboBox dropdowns in all widget hierarchies
-        local comboBoxHandled = checkComboBoxDropdowns(widgets)
-        if rootContainer and rootContainer.children then
-            comboBoxHandled = comboBoxHandled or checkComboBoxDropdowns(rootContainer.children)
-        end
-        
-        if comboBoxHandled then
-            return -- ComboBox dropdown handled the click, don't process other widgets
         end
 
         -- Recursively traverse all widgets and their children (depth-first, z-order)
