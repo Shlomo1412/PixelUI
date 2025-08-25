@@ -532,7 +532,7 @@ function Widget:removeChild(child)
 end
 
 function Widget:handleClick(x, y)
-    if not self.enabled or not self.visible then return false end
+    if not self.enabled or not self:isEffectivelyVisible() then return false end
 
     local absX, absY = self:getAbsolutePos()
     local relX, relY = x - absX + 1, y - absY + 1
@@ -576,7 +576,7 @@ function Widget:handleClick(x, y)
 end
 -- Drag event handler for widgets
 function Widget:handleDrag(x, y)
-    if not self.enabled or not self.visible or not self.draggable then return false end
+    if not self.enabled or not self:isEffectivelyVisible() or not self.draggable then return false end
     local absX, absY = self:getAbsolutePos()
     local relX, relY = x - absX + 1, y - absY + 1
     -- Move widget based on drag offset
@@ -599,7 +599,7 @@ function Widget:handleDragEnd()
 end
 
 function Widget:draw()
-    if not self.visible then return end
+    if not self:isEffectivelyVisible() then return end
     
     self:render()
     
@@ -607,6 +607,20 @@ function Widget:draw()
     for _, child in ipairs(self.children) do
         child:draw()
     end
+end
+
+-- Check if widget is effectively visible (considering parent visibility)
+function Widget:isEffectivelyVisible()
+    if not self.visible then return false end
+    
+    -- Check parent visibility recursively
+    local parent = self.parent
+    while parent do
+        if not parent.visible then return false end
+        parent = parent.parent
+    end
+    
+    return true
 end
 
 function Widget:render()
@@ -2087,7 +2101,7 @@ function Container:calculateContentBounds()
 end
 
 function Container:draw()
-    if not self.visible then return end
+    if not self:isEffectivelyVisible() then return end
     self:render()
     
     -- Calculate content and viewport dimensions
@@ -2098,7 +2112,7 @@ function Container:draw()
     
     -- Draw children with scroll offset and clipping
     for _, child in ipairs(self.children) do
-        if child.visible ~= false then
+        if child.visible ~= false then -- Only check child's own visibility since parent visibility is checked by child:draw()
             -- Store original position
             local originalX, originalY = child.x, child.y
             
@@ -2134,7 +2148,7 @@ function Container:draw()
 end
 
 function Container:handleScroll(x, y, direction)
-    if not self.enabled or not self.visible or not self.isScrollable then return false end
+    if not self.enabled or not self:isEffectivelyVisible() or not self.isScrollable then return false end
     
     local absX, absY = self:getAbsolutePos()
     local relX, relY = x - absX + 1, y - absY + 1
@@ -4900,6 +4914,7 @@ end
 
 -- Alias draw to render for compatibility with the widget system
 function NotificationToast:draw()
+    if not self:isEffectivelyVisible() then return end
     self:render()
 end
 
