@@ -10,7 +10,7 @@ PixelUI.init()
 -- Demo state and configuration
 local demo = {
     currentFrame = 1,
-    totalFrames = 36,  -- Updated to include new widgets: RichTextBox, CodeEditor, Accordion, Minimap, StatusBar
+    totalFrames = 34,  -- Updated to remove ProgressRing and CircularProgressBar widgets
     frames = {
         {name = "Label", component = "label", 
          description = "Static text display widget with alignment and color options"},
@@ -26,10 +26,6 @@ local demo = {
          description = "Dual-handle range slider for selecting value ranges"},
         {name = "ProgressBar", component = "progressBar", 
          description = "Visual progress indicator with customizable styling"},
-        {name = "ProgressRing", component = "progressRing", 
-         description = "Circular progress indicator with ring-style visualization"},
-        {name = "CircularProgressBar", component = "circularProgressBar", 
-         description = "Advanced circular progress with multiple styles and animations"},
         {name = "ListView", component = "listView", 
          description = "Scrollable list with item selection and events"},
         {name = "TreeView", component = "treeView",
@@ -95,10 +91,6 @@ local demo = {
         rangeSliderMax = 75,
         progressValue = 35,
         progressIntermediateActive = false,
-        progressRingValue = 65,
-        circularProgressValue = 80,
-        circularProgressStyle = "filled",
-        circularProgressAnimated = false,
         selectedItem = 1,
         listItems = {"Apple", "Banana", "Cherry", "Date", "Elderberry", "Fig", "Grape"},
         buttonClicks = 0,
@@ -357,10 +349,6 @@ function demo:createComponentDemo(component)
         self:createRangeSliderDemo()
     elseif component == "progressBar" then
         self:createProgressBarDemo()
-    elseif component == "progressRing" then
-        self:createProgressRingDemo()
-    elseif component == "circularProgressBar" then
-        self:createCircularProgressBarDemo()
     elseif component == "listView" then
         self:createListViewDemo()
     elseif component == "treeView" then
@@ -939,268 +927,6 @@ function demo:createProgressBarDemo()
     PixelUI.label({
         x = 35, y = 15,
         text = "- Used for loading",
-        color = colors.lightGray
-    })
-end
-
--- ProgressRing demonstration
-function demo:createProgressRingDemo()
-    PixelUI.label({
-        x = 2, y = 6,
-        text = "Progress Ring (" .. self.state.progressRingValue .. "%):",
-        color = colors.white
-    })
-    
-    -- Main progress ring
-    PixelUI.progressRing({
-        x = 2, y = 8,
-        width = 9,
-        height = 7,
-        value = self.state.progressRingValue,
-        max = 100,
-        color = colors.cyan,
-        background = colors.gray,
-        showValue = true,
-        showMarkers = true,
-        markerColor = colors.white
-    })
-    
-    -- Smaller ring with different color
-    PixelUI.progressRing({
-        x = 14, y = 8,
-        width = 7,
-        height = 7,
-        value = self.state.progressRingValue * 0.8,
-        max = 100,
-        color = colors.lime,
-        background = colors.lightGray,
-        showValue = true,
-        valueFormat = "%.0f"
-    })
-    
-    -- Ring with custom start angle
-    PixelUI.progressRing({
-        x = 24, y = 8,
-        width = 7,
-        height = 7,
-        value = self.state.progressRingValue * 1.2,
-        max = 100,
-        color = colors.orange,
-        background = colors.gray,
-        startAngle = 90,
-        clockwise = false,
-        showValue = false
-    })
-    
-    -- Control buttons
-    PixelUI.button({
-        x = 34, y = 8,
-        text = "+10%",
-        background = colors.green,
-        color = colors.white,
-        width = 8,
-        height = 1,
-        onClick = function()
-            self.state.progressRingValue = math.min(100, self.state.progressRingValue + 10)
-            self:refreshFrame()
-        end
-    })
-    
-    PixelUI.button({
-        x = 34, y = 10,
-        text = "-10%",
-        background = colors.orange,
-        color = colors.white,
-        width = 8,
-        height = 1,
-        onClick = function()
-            self.state.progressRingValue = math.max(0, self.state.progressRingValue - 10)
-            self:refreshFrame()
-        end
-    })
-    
-    PixelUI.button({
-        x = 34, y = 12,
-        text = "Random",
-        background = colors.purple,
-        color = colors.white,
-        width = 8,
-        height = 1,
-        onClick = function()
-            self.state.progressRingValue = math.random(0, 100)
-            self:refreshFrame()
-        end
-    })
-    
-    PixelUI.button({
-        x = 34, y = 14,
-        text = "Reset",
-        background = colors.red,
-        color = colors.white,
-        width = 8,
-        height = 1,
-        onClick = function()
-            self.state.progressRingValue = 65
-            self:refreshFrame()
-        end
-    })
-    
-    -- Info labels
-    PixelUI.label({
-        x = 2, y = 15,
-        text = "Features: Value display, markers, custom angles, colors",
-        color = colors.lightGray
-    })
-    
-    PixelUI.label({
-        x = 2, y = 16,
-        text = "Left: Full featured | Center: Compact | Right: Custom angle",
-        color = colors.lightGray
-    })
-end
-
--- CircularProgressBar demonstration
-function demo:createCircularProgressBarDemo()
-    PixelUI.label({
-        x = 2, y = 6,
-        text = "Circular Progress Bar (" .. self.state.circularProgressValue .. "%, " .. 
-              self.state.circularProgressStyle .. " style):",
-        color = colors.white
-    })
-    
-    -- Main circular progress with title
-    PixelUI.circularProgressBar({
-        x = 2, y = 8,
-        width = 9,
-        height = 7,
-        value = self.state.circularProgressValue,
-        max = 100,
-        color = colors.cyan,
-        style = self.state.circularProgressStyle,
-        showTitle = true,
-        title = "Loading",
-        showValue = true,
-        animated = self.state.circularProgressAnimated,
-        segments = 12
-    })
-    
-    -- Segmented style example
-    PixelUI.circularProgressBar({
-        x = 14, y = 8,
-        width = 7,
-        height = 7,
-        value = self.state.circularProgressValue * 0.7,
-        max = 100,
-        color = colors.lime,
-        style = "segmented",
-        showValue = true,
-        segments = 8
-    })
-    
-    -- Dots style example
-    PixelUI.circularProgressBar({
-        x = 24, y = 8,
-        width = 7,
-        height = 7,
-        value = self.state.circularProgressValue * 0.9,
-        max = 100,
-        color = colors.orange,
-        style = "dots",
-        showValue = true,
-        segments = 10
-    })
-    
-    -- Control buttons - Progress
-    PixelUI.label({
-        x = 2, y = 16,
-        text = "Progress Controls:",
-        color = colors.white
-    })
-    
-    PixelUI.button({
-        x = 2, y = 17,
-        text = "+10%",
-        background = colors.green,
-        color = colors.white,
-        width = 6,
-        height = 1,
-        onClick = function()
-            self.state.circularProgressValue = math.min(100, self.state.circularProgressValue + 10)
-            self:refreshFrame()
-        end
-    })
-    
-    PixelUI.button({
-        x = 10, y = 17,
-        text = "-10%",
-        background = colors.orange,
-        color = colors.white,
-        width = 6,
-        height = 1,
-        onClick = function()
-            self.state.circularProgressValue = math.max(0, self.state.circularProgressValue - 10)
-            self:refreshFrame()
-        end
-    })
-    
-    PixelUI.button({
-        x = 18, y = 17,
-        text = "Random",
-        background = colors.purple,
-        color = colors.white,
-        width = 8,
-        height = 1,
-        onClick = function()
-            self.state.circularProgressValue = math.random(0, 100)
-            self:refreshFrame()
-        end
-    })
-    
-    -- Style controls
-    PixelUI.label({
-        x = 30, y = 16,
-        text = "Style Controls:",
-        color = colors.white
-    })
-    
-    PixelUI.button({
-        x = 30, y = 17,
-        text = "Style",
-        background = self.state.circularProgressStyle == "filled" and colors.blue or colors.gray,
-        color = colors.white,
-        width = 6,
-        height = 1,
-        onClick = function()
-            local styles = {"filled", "segmented", "dots"}
-            local currentIndex = 1
-            for i, style in ipairs(styles) do
-                if style == self.state.circularProgressStyle then
-                    currentIndex = i
-                    break
-                end
-            end
-            self.state.circularProgressStyle = styles[(currentIndex % #styles) + 1]
-            self:refreshFrame()
-        end
-    })
-    
-    PixelUI.button({
-        x = 38, y = 17,
-        text = self.state.circularProgressAnimated and "Stop" or "Animate",
-        background = self.state.circularProgressAnimated and colors.red or colors.blue,
-        color = colors.white,
-        width = 8,
-        height = 1,
-        onClick = function()
-            self.state.circularProgressAnimated = not self.state.circularProgressAnimated
-            self:refreshFrame()
-        end
-    })
-    
-    -- Info labels
-    PixelUI.label({
-        x = 2, y = 18,
-        text = "Styles: Filled (smooth), Segmented (discrete), Dots (individual points)",
         color = colors.lightGray
     })
 end
